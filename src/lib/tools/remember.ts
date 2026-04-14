@@ -1,6 +1,8 @@
-import type { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
 
+import { desc, eq } from 'drizzle-orm'
+
+import { toolMemoryEntries, toolScratchMemory } from '../../db/schema'
 import { getErrorMessage, isRecord, parseOptionalPositiveInteger } from './common'
 import { withToolDatabase } from './database'
 import type { ToolExecutionContext } from './tool-types'
@@ -58,6 +60,7 @@ type RememberSuccessResult =
 	| { content: string; memory: MemoryKind; ok: true }
 	| { entries: MemoryEntry[]; memory: MemoryKind; ok: true; total: number; truncated: boolean }
 	| { entry: MemoryEntry; memory: MemoryKind; ok: true }
+type DatabaseLike = Parameters<Parameters<typeof withToolDatabase>[1]>[0]
 
 export type RememberResult = RememberErrorResult | RememberSuccessResult
 
@@ -89,7 +92,7 @@ export function runRememberTool(input: unknown, options: ToolExecutionContext = 
 	}
 }
 
-function runScratchMemory(database: Database, argumentsValue: RememberArguments): RememberSuccessResult {
+function runScratchMemory(database: DatabaseLike, argumentsValue: RememberArguments): RememberSuccessResult {
 	const currentContent = getScratchContent(database)
 
 	switch (argumentsValue.action) {
@@ -100,18 +103,16 @@ function runScratchMemory(database: Database, argumentsValue: RememberArguments)
 			const nextContent = buildScratchContent(currentContent, argumentsValue.content, argumentsValue.mode ?? 'append')
 			const now = new Date().toISOString()
 			database
-				.prepare(
-					`INSERT INTO tool_scratch_memory (id, content, updated_at)
-					VALUES (1, ?, ?)
-					ON CONFLICT(id) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at`
-				)
-				.run(nextContent, now)
+				.insert(toolScratchMemory)
+				.values({ content: nextContent, id: 1, updatedAt: now })
+				.onConflictDoUpdate({ set: { content: nextContent, updatedAt: now }, target: toolScratchMemory.id })
+				.run()
 			return { content: nextContent, memory: 'scratch', ok: true }
 		}
 	}
 }
 
-function runStructuredMemory(database: Database, argumentsValue: RememberArguments): RememberSuccessResult {
+function runStructuredMemory(database: DatabaseLike, argumentsValue: RememberArguments): RememberSuccessResult {
 	const memory = argumentsValue.memory === 'episodic' ? 'episodic' : 'long-term'
 
 	switch (argumentsValue.action) {
@@ -123,10 +124,12 @@ function runStructuredMemory(database: Database, argumentsValue: RememberArgumen
 	}
 }
 
-function getScratchContent(database: Database): string {
-	const row = database.prepare('SELECT content FROM tool_scratch_memory WHERE id = 1').get() as {
-		content: string
-	} | null
+function getScratchContent(database: DatabaseLike): string {
+	const row = database
+		.select({ content: toolScratchMemory.content })
+		.from(toolScratchMemory)
+		.where(eq(toolScratchMemory.id, 1))
+		.get()
 	return row?.content ?? ''
 }
 
@@ -200,7 +203,7 @@ function buildScratchContent(currentContent: string, nextChunk: string | undefin
 }
 
 function writeStructuredMemory(
-	database: Database,
+	database: DatabaseLike,
 	memory: Extract<MemoryKind, 'episodic' | 'long-term'>,
 	argumentsValue: RememberArguments
 ): RememberSuccessResult {
@@ -217,23 +220,22 @@ function writeStructuredMemory(
 		title: argumentsValue.title?.trim() ?? ''
 	}
 	database
-		.prepare(
-			`INSERT INTO tool_memory_entries (
-				id,
-				kind,
-				title,
-				content,
-				tags_json,
-				created_at
-			) VALUES (?, ?, ?, ?, ?, ?)`
-		)
-		.run(entry.id, memory, entry.title, entry.content, JSON.stringify(entry.tags), entry.createdAt)
+		.insert(toolMemoryEntries)
+		.values({
+			content: entry.content,
+			createdAt: entry.createdAt,
+			id: entry.id,
+			kind: memory,
+			tagsJson: JSON.stringify(entry.tags),
+			title: entry.title
+		})
+		.run()
 
 	return { entry, memory, ok: true }
 }
 
 function listStructuredMemory(
-	database: Database,
+	database: DatabaseLike,
 	memory: Extract<MemoryKind, 'episodic' | 'long-term'>,
 	argumentsValue: RememberArguments
 ): RememberSuccessResult {
@@ -250,24 +252,23 @@ function listStructuredMemory(
 }
 
 function readStructuredMemoryEntries(
-	database: Database,
+	database: DatabaseLike,
 	memory: Extract<MemoryKind, 'episodic' | 'long-term'>,
 	query: string | undefined
 ): MemoryEntry[] {
 	const normalizedQuery = query?.trim().toLowerCase()
 	const rows = database
-		.prepare(
-			`SELECT
-				id,
-				title,
-				content,
-				tags_json AS tagsJson,
-				created_at AS createdAt
-			FROM tool_memory_entries
-			WHERE kind = ?
-			ORDER BY created_at DESC`
-		)
-		.all(memory) as MemoryDatabaseRow[]
+		.select({
+			content: toolMemoryEntries.content,
+			createdAt: toolMemoryEntries.createdAt,
+			id: toolMemoryEntries.id,
+			tagsJson: toolMemoryEntries.tagsJson,
+			title: toolMemoryEntries.title
+		})
+		.from(toolMemoryEntries)
+		.where(eq(toolMemoryEntries.kind, memory))
+		.orderBy(desc(toolMemoryEntries.createdAt))
+		.all() as MemoryDatabaseRow[]
 
 	return rows
 		.map(row => toMemoryEntry(row))

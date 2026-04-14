@@ -80,6 +80,7 @@ function useScreenKeyboard(
 		},
 		inFlightRequest: controller.inFlightRequest,
 		openCommandPalette: controller.openCommandPalette,
+		openMemoryView: controller.openMemoryView,
 		openProviderConfig: controller.openProviderConfig,
 		openSessionsView: controller.openSessionsView,
 		openShortcutsView: controller.openShortcutsView,

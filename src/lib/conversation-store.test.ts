@@ -83,17 +83,26 @@ test('migrates the shared database with tool storage tables', () => {
 	store.close()
 
 	const database = new Database(databaseFile)
+	const drizzleMigrationCount = database.prepare('SELECT COUNT(*) AS count FROM "__drizzle_migrations"').get() as {
+		count: number
+	}
 	const version = (database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
 	const tableNames = database
 		.prepare(
 			`SELECT name
 			FROM sqlite_master
-			WHERE type = 'table' AND name IN ('tool_todos', 'tool_memory_entries', 'tool_scratch_memory')
+			WHERE type = 'table' AND name IN ('tool_todos', 'tool_memory_entries', 'tool_scratch_memory', '__drizzle_migrations')
 			ORDER BY name ASC`
 		)
 		.all() as Array<{ name: string }>
 	database.close()
 
 	expect(version).toBe(4)
-	expect(tableNames.map(table => table.name)).toEqual(['tool_memory_entries', 'tool_scratch_memory', 'tool_todos'])
+	expect(drizzleMigrationCount.count).toBe(1)
+	expect(tableNames.map(table => table.name)).toEqual([
+		'__drizzle_migrations',
+		'tool_memory_entries',
+		'tool_scratch_memory',
+		'tool_todos'
+	])
 })

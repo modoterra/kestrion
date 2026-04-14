@@ -15,11 +15,12 @@ import {
 	useShortcutsOverlayAction,
 	useToolsOverlayAction
 } from './overlays'
-import { useCommandPaletteOptions, useCommandPaletteOverlayAction } from './palette'
+import { useCommandPaletteOptions, useCommandPaletteOverlayAction, useMemoryOverlayAction } from './palette'
 import { useToolExecutionContext } from './tool-execution-context'
 
 type MainScreenOverlayActions = {
 	openCommandPalette: () => void
+	openMemoryView: () => void
 	openProviderConfig: () => void
 	openSessionsView: () => void
 	openShortcutsView: () => void
@@ -94,11 +95,16 @@ function useMainScreenOverlays(
 		setStatus: state.setStatus,
 		viewStack
 	})
-	const { openShortcutsView } = useShortcutsOverlayAction({ busy: state.busy, setStatus: state.setStatus, viewStack })
-	const { openToolsView } = useToolsOverlayAction({ busy: state.busy, setStatus: state.setStatus, viewStack })
+	const { openMemoryView, openShortcutsView, openToolsView } = useBrowserOverlayActions(
+		props.paths,
+		state.busy,
+		state.setStatus,
+		viewStack
+	)
 	const { openCommandPalette } = usePaletteOverlayActions(
 		state,
 		coreActions,
+		openMemoryView,
 		openProviderConfig,
 		openSessionsView,
 		openShortcutsView,
@@ -106,7 +112,20 @@ function useMainScreenOverlays(
 		viewStack
 	)
 
-	return { openCommandPalette, openProviderConfig, openSessionsView, openShortcutsView, openToolsView }
+	return { openCommandPalette, openMemoryView, openProviderConfig, openSessionsView, openShortcutsView, openToolsView }
+}
+
+function useBrowserOverlayActions(
+	paths: AppProps['paths'],
+	busy: boolean,
+	setStatus: MainScreenState['setStatus'],
+	viewStack: ReturnType<typeof useViewStack>
+): Pick<MainScreenOverlayActions, 'openMemoryView' | 'openShortcutsView' | 'openToolsView'> {
+	const { openShortcutsView } = useShortcutsOverlayAction({ busy, setStatus, viewStack })
+	const { openMemoryView } = useMemoryOverlayAction({ busy, paths, setStatus, viewStack })
+	const { openToolsView } = useToolsOverlayAction({ busy, setStatus, viewStack })
+
+	return { openMemoryView, openShortcutsView, openToolsView }
 }
 
 function useMainScreenCoreActions(
@@ -159,6 +178,7 @@ function useMainScreenCoreActions(
 function usePaletteOverlayActions(
 	state: MainScreenState,
 	coreActions: MainScreenCoreActions,
+	openMemoryView: () => void,
 	openProviderConfig: () => void,
 	openSessionsView: () => void,
 	openShortcutsView: () => void,
@@ -167,6 +187,7 @@ function usePaletteOverlayActions(
 ): Pick<MainScreenOverlayActions, 'openCommandPalette'> {
 	const commandPaletteOptions = useCommandPaletteOptions({
 		createConversation: coreActions.createConversation,
+		openMemoryView,
 		openProviderConfig,
 		openSessionsView,
 		openShortcutsView,

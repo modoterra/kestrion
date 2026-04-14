@@ -2,6 +2,8 @@ import type { MutableRefObject, ReactNode } from 'react'
 
 import { CommandPaletteScreen, type CommandPaletteOption } from '../command-palette/screen'
 
+export { useMemoryOverlayAction } from './memory-overlay'
+
 type ViewStackEntry = { element: ReactNode; onPop?: () => void }
 type ViewStackControls = {
 	current: ViewStackEntry | null
@@ -11,6 +13,7 @@ type ViewStackControls = {
 }
 type CommandPaletteActions = {
 	createConversation: () => void
+	openMemoryView: () => void
 	openProviderConfig: () => void
 	openSessionsView: () => void
 	openShortcutsView: () => void
@@ -62,6 +65,7 @@ export function useCommandPaletteOverlayAction({
 
 export function useCommandPaletteOptions({
 	createConversation,
+	openMemoryView,
 	openProviderConfig,
 	openSessionsView,
 	openShortcutsView,
@@ -76,6 +80,7 @@ export function useCommandPaletteOptions({
 			'browse-sessions',
 			openSessionsView
 		),
+		createCommandPaletteOption('Memory', 'Browse scratch, episodic, and long-term memory', 'memory', openMemoryView),
 		createCommandPaletteOption(
 			'Provider settings',
 			'Edit provider and model settings',

@@ -35,6 +35,7 @@ export const COMPOSER_KEYBINDINGS: Array<{ name: string; action: 'submit' }> = [
 
 export const SHORTCUTS = [
 	{ command: 'ctrl+r', description: 'browse sessions', footerLabel: 'sessions' },
+	{ command: 'ctrl+m', description: 'browse memories', footerLabel: 'memory' },
 	{ command: 'ctrl+n', description: 'start a new session', footerLabel: 'new' },
 	{ command: 'ctrl+t', description: 'browse tools' },
 	{ command: 'ctrl+k', description: 'open commands', footerLabel: 'commands' },

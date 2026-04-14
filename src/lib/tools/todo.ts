@@ -1,6 +1,8 @@
-import type { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
 
+import { asc, desc, eq } from 'drizzle-orm'
+
+import { toolTodos } from '../../db/schema'
 import { getErrorMessage, isRecord, parseOptionalPositiveInteger } from './common'
 import { withToolDatabase } from './database'
 import type { ToolExecutionContext } from './tool-types'
@@ -58,7 +60,7 @@ type TodoArguments = {
 type TodoDatabaseRow = {
 	content: string
 	createdAt: string
-	done: number
+	done: boolean
 	id: string
 	notes: string
 	priority: TodoPriority
@@ -70,6 +72,7 @@ type TodoSuccessResult =
 	| { id: string; ok: true; removed: boolean }
 	| { item: TodoItem; ok: true }
 	| { items: TodoItem[]; ok: true; total: number; truncated: boolean }
+type DatabaseLike = Parameters<Parameters<typeof withToolDatabase>[1]>[0]
 
 export type TodoResult = TodoErrorResult | TodoSuccessResult
 
@@ -108,7 +111,7 @@ export function runTodoTool(input: unknown, options: ToolExecutionContext = {}):
 	}
 }
 
-function addTodo(database: Database, argumentsValue: TodoArguments): TodoSuccessResult {
+function addTodo(database: DatabaseLike, argumentsValue: TodoArguments): TodoSuccessResult {
 	const content = argumentsValue.content?.trim()
 	if (!content) {
 		throw new Error('content is required for action "add".')
@@ -125,42 +128,29 @@ function addTodo(database: Database, argumentsValue: TodoArguments): TodoSuccess
 		updatedAt: now
 	}
 
-	database
-		.prepare(
-			`INSERT INTO tool_todos (
-				id,
-				content,
-				notes,
-				priority,
-				done,
-				created_at,
-				updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?)`
-		)
-		.run(item.id, item.content, item.notes, item.priority, item.done ? 1 : 0, item.createdAt, item.updatedAt)
+	database.insert(toolTodos).values(item).run()
 
 	return { item, ok: true }
 }
 
-function updateTodo(database: Database, argumentsValue: TodoArguments): TodoSuccessResult {
+function updateTodo(database: DatabaseLike, argumentsValue: TodoArguments): TodoSuccessResult {
 	if (!argumentsValue.id?.trim()) {
 		throw new Error('id is required for action "update".')
 	}
 
 	const current = database
-		.prepare(
-			`SELECT
-				id,
-				content,
-				notes,
-				priority,
-				done,
-				created_at AS createdAt,
-				updated_at AS updatedAt
-			FROM tool_todos
-			WHERE id = ?`
-		)
-		.get(argumentsValue.id) as TodoDatabaseRow | null
+		.select({
+			content: toolTodos.content,
+			createdAt: toolTodos.createdAt,
+			done: toolTodos.done,
+			id: toolTodos.id,
+			notes: toolTodos.notes,
+			priority: toolTodos.priority,
+			updatedAt: toolTodos.updatedAt
+		})
+		.from(toolTodos)
+		.where(eq(toolTodos.id, argumentsValue.id))
+		.get() as TodoDatabaseRow | undefined
 
 	if (!current) {
 		throw new Error(`Todo "${argumentsValue.id}" was not found.`)
@@ -169,7 +159,7 @@ function updateTodo(database: Database, argumentsValue: TodoArguments): TodoSucc
 	const item: TodoItem = {
 		content: argumentsValue.content?.trim() || current.content,
 		createdAt: current.createdAt,
-		done: argumentsValue.done ?? Boolean(current.done),
+		done: argumentsValue.done ?? current.done,
 		id: current.id,
 		notes: argumentsValue.notes?.trim() ?? current.notes,
 		priority: argumentsValue.priority ?? current.priority,
@@ -177,45 +167,52 @@ function updateTodo(database: Database, argumentsValue: TodoArguments): TodoSucc
 	}
 
 	database
-		.prepare(
-			`UPDATE tool_todos
-			SET content = ?, notes = ?, priority = ?, done = ?, updated_at = ?
-			WHERE id = ?`
-		)
-		.run(item.content, item.notes, item.priority, item.done ? 1 : 0, item.updatedAt, item.id)
+		.update(toolTodos)
+		.set({
+			content: item.content,
+			done: item.done,
+			notes: item.notes,
+			priority: item.priority,
+			updatedAt: item.updatedAt
+		})
+		.where(eq(toolTodos.id, item.id))
+		.run()
 
 	return { item, ok: true }
 }
 
-function removeTodo(database: Database, argumentsValue: TodoArguments): TodoSuccessResult {
+function removeTodo(database: DatabaseLike, argumentsValue: TodoArguments): TodoSuccessResult {
 	if (!argumentsValue.id?.trim()) {
 		throw new Error('id is required for action "remove".')
 	}
 
-	const removedCount = database.prepare('DELETE FROM tool_todos WHERE id = ?').run(argumentsValue.id).changes
+	const removedCount = database
+		.delete(toolTodos)
+		.where(eq(toolTodos.id, argumentsValue.id))
+		.returning({ id: toolTodos.id })
+		.all().length
 	return { id: argumentsValue.id, ok: true, removed: removedCount > 0 }
 }
 
-function clearTodos(database: Database): TodoSuccessResult {
-	const cleared = database.prepare('DELETE FROM tool_todos').run().changes
+function clearTodos(database: DatabaseLike): TodoSuccessResult {
+	const cleared = database.delete(toolTodos).returning({ id: toolTodos.id }).all().length
 	return { cleared, ok: true }
 }
 
-function listTodos(database: Database, argumentsValue: TodoArguments): TodoSuccessResult {
+function listTodos(database: DatabaseLike, argumentsValue: TodoArguments): TodoSuccessResult {
 	const query = argumentsValue.query?.trim().toLowerCase()
 	const rows = database
-		.prepare(
-			`SELECT
-				id,
-				content,
-				notes,
-				priority,
-				done,
-				created_at AS createdAt,
-				updated_at AS updatedAt
-			FROM tool_todos
-			ORDER BY done ASC, updated_at DESC`
-		)
+		.select({
+			content: toolTodos.content,
+			createdAt: toolTodos.createdAt,
+			done: toolTodos.done,
+			id: toolTodos.id,
+			notes: toolTodos.notes,
+			priority: toolTodos.priority,
+			updatedAt: toolTodos.updatedAt
+		})
+		.from(toolTodos)
+		.orderBy(asc(toolTodos.done), desc(toolTodos.updatedAt))
 		.all() as TodoDatabaseRow[]
 	const filteredTodos = rows
 		.map(row => toTodoItem(row))
@@ -241,7 +238,7 @@ function toTodoItem(row: TodoDatabaseRow): TodoItem {
 	return {
 		content: row.content,
 		createdAt: row.createdAt,
-		done: Boolean(row.done),
+		done: row.done,
 		id: row.id,
 		notes: row.notes,
 		priority: row.priority,

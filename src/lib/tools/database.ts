@@ -1,18 +1,17 @@
-import type { Database } from 'bun:sqlite'
-
-import { openAppDatabase } from '../app-database'
+import type { AppDatabase } from '../app-database'
+import { openAppDatabaseConnectionWithDrizzle } from '../app-database'
 import { getAppPaths } from './common'
 import type { ToolExecutionContext } from './tool-types'
 
 export function withToolDatabase<TResult>(
 	context: ToolExecutionContext,
-	callback: (database: Database) => TResult
+	callback: (database: AppDatabase) => TResult
 ): TResult {
-	const database = openAppDatabase(getAppPaths(context).databaseFile)
+	const connection = openAppDatabaseConnectionWithDrizzle(getAppPaths(context).databaseFile)
 
 	try {
-		return callback(database)
+		return callback(connection.db)
 	} finally {
-		database.close()
+		connection.client.close()
 	}
 }

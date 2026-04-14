@@ -8,6 +8,7 @@ export function useMainScreenKeyboard({
 	destroyRenderer,
 	inFlightRequest,
 	openCommandPalette,
+	openMemoryView,
 	openProviderConfig,
 	openSessionsView,
 	openShortcutsView,
@@ -19,6 +20,7 @@ export function useMainScreenKeyboard({
 	destroyRenderer: () => void
 	inFlightRequest: MutableRefObject<AbortController | null>
 	openCommandPalette: () => void
+	openMemoryView: () => void
 	openProviderConfig: () => void
 	openSessionsView: () => void
 	openShortcutsView: () => void
@@ -40,6 +42,7 @@ export function useMainScreenKeyboard({
 				busy,
 				createConversation,
 				openCommandPalette,
+				openMemoryView,
 				openProviderConfig,
 				openSessionsView,
 				openShortcutsView,
@@ -69,6 +72,7 @@ function handleViewShortcutKey(
 	busy: boolean,
 	createConversation: () => void,
 	openCommandPalette: () => void,
+	openMemoryView: () => void,
 	openProviderConfig: () => void,
 	openSessionsView: () => void,
 	openShortcutsView: () => void,
@@ -81,6 +85,13 @@ function handleViewShortcutKey(
 
 	if (key.ctrl && key.name === 'p') {
 		openProviderConfig()
+		return
+	}
+
+	if (key.ctrl && key.name === 'm') {
+		if (!busy) {
+			openMemoryView()
+		}
 		return
 	}
 

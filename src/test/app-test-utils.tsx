@@ -6,14 +6,12 @@ import { testRender } from '@opentui/react/test-utils'
 import { act } from 'react'
 
 import { App } from '../app'
-import { AgentService } from '../lib/agent-service'
-import { loadWritableAppConfig, saveAppConfig } from '../lib/config'
-import { ConversationStore } from '../lib/conversation-store'
-import { resolveAppPaths } from '../lib/paths'
+import { createRenderAppContext, type RenderAppMemory } from './render-app-context'
 
 type RenderAppOptions = {
 	apiKeyConfigured?: boolean
 	height?: number
+	memory?: RenderAppMemory
 	messages?: Array<{ content: string; role: 'assistant' | 'user' }>
 	onExit?: () => void
 	providerConfigured?: boolean
@@ -22,6 +20,7 @@ type RenderAppOptions = {
 }
 
 type TestSetup = Awaited<ReturnType<typeof testRender>>
+type RenderAppContext = ReturnType<typeof createRenderAppContext>
 
 let testSetup: TestSetup | null = null
 const cleanupTasks: Array<() => void> = []
@@ -47,11 +46,10 @@ export function getTestSetup(): TestSetup {
 
 export async function renderApp(options: RenderAppOptions = {}): Promise<TestSetup> {
 	const homeDir = createHomeDir()
-	const paths = resolveAppPaths({ homeDir })
-	const writableConfig = createWritableConfig(paths, options)
-	const config = saveAppConfig(paths, writableConfig)
-	const store = createConversationStore(paths.databaseFile)
-	const service = new AgentService(store, config)
+	const { config, paths, service, store, writableConfig } = createRenderAppContext(homeDir, options)
+	cleanupTasks.push(() => {
+		store.close()
+	})
 	await seedSavedConversations(service, store, config, options.savedConversations ?? [])
 	const thread =
 		options.messages && options.messages.length > 0
@@ -160,18 +158,18 @@ function delay(ms: number): Promise<void> {
 }
 
 function seedSavedConversations(
-	service: AgentService,
-	store: ConversationStore,
-	config: ReturnType<typeof saveAppConfig>,
+	service: RenderAppContext['service'],
+	store: RenderAppContext['store'],
+	config: RenderAppContext['config'],
 	conversations: Array<Array<{ content: string; role: 'assistant' | 'user' }>>
 ): Promise<void> {
 	return seedSavedConversationAtIndex(service, store, config, conversations, 0)
 }
 
 function seedSavedConversationAtIndex(
-	service: AgentService,
-	store: ConversationStore,
-	config: ReturnType<typeof saveAppConfig>,
+	service: RenderAppContext['service'],
+	store: RenderAppContext['store'],
+	config: RenderAppContext['config'],
 	conversations: Array<Array<{ content: string; role: 'assistant' | 'user' }>>,
 	index: number
 ): Promise<void> {
@@ -193,35 +191,12 @@ function createHomeDir(): string {
 	return homeDir
 }
 
-function createWritableConfig(
-	paths: ReturnType<typeof resolveAppPaths>,
-	options: RenderAppOptions
-): ReturnType<typeof loadWritableAppConfig> {
-	const writableConfig = loadWritableAppConfig(paths)
-	writableConfig.providers.fireworks.providerMode = (options.providerConfigured ?? true) ? 'fireworks' : null
-
-	if (options.apiKeyConfigured ?? true) {
-		writableConfig.providers.fireworks.apiKey = 'test-api-key'
-	}
-
-	return writableConfig
-}
-
-function createConversationStore(databaseFile: string): ConversationStore {
-	const store = new ConversationStore(databaseFile)
-	cleanupTasks.push(() => {
-		store.close()
-	})
-
-	return store
-}
-
 function seedConversationThread(
-	service: AgentService,
-	store: ConversationStore,
-	config: ReturnType<typeof saveAppConfig>,
+	service: RenderAppContext['service'],
+	store: RenderAppContext['store'],
+	config: RenderAppContext['config'],
 	messages: Array<{ content: string; role: 'assistant' | 'user' }>
-): ReturnType<AgentService['createDraftConversation']> {
+): ReturnType<RenderAppContext['service']['createDraftConversation']> {
 	let thread = service.createDraftConversation()
 
 	for (const message of messages) {
@@ -235,12 +210,12 @@ function seedConversationThread(
 }
 
 function appendAssistantMessage(
-	store: ConversationStore,
-	service: AgentService,
-	config: ReturnType<typeof saveAppConfig>,
-	thread: ReturnType<AgentService['createDraftConversation']>,
+	store: RenderAppContext['store'],
+	service: RenderAppContext['service'],
+	config: RenderAppContext['config'],
+	thread: ReturnType<RenderAppContext['service']['createDraftConversation']>,
 	content: string
-): ReturnType<AgentService['createDraftConversation']> {
+): ReturnType<RenderAppContext['service']['createDraftConversation']> {
 	const savedThread =
 		thread.conversation.id === 'draft'
 			? store.createConversation({
