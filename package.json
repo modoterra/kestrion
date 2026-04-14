@@ -1,13 +1,25 @@
 {
-  "name": "kestrion-new",
+  "name": "kestrion",
+  "version": "1.33.4",
+  "buildHash": "f694531",
   "module": "src/index.tsx",
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run --watch src/index.tsx"
+    "dev": "bun run --watch src/index.tsx",
+    "start": "bun run src/index.tsx",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "harness:lint": "oxlint src --deny-warnings",
+    "harness:fmt": "oxfmt src",
+    "harness:type": "tsc --noEmit",
+    "harness:test": "bun run test",
+    "harness": "bun run harness:lint && bun run harness:fmt && bun run harness:type && bun run harness:test"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "oxfmt": "^0.45.0",
+    "oxlint": "^1.60.0"
   },
   "peerDependencies": {
     "typescript": "^5"

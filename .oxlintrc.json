@@ -1,0 +1,59 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "react",
+    "import",
+    "promise",
+    "node",
+    "typescript",
+    "unicorn",
+    "oxc"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "error",
+    "perf": "error"
+  },
+  "rules": {
+    "curly": "error",
+    "eqeqeq": "error",
+    "no-console": "error",
+    "no-throw-literal": "error",
+    "no-warning-comments": "error",
+    "import/no-cycle": "error",
+    "import/no-default-export": "error",
+    "import/no-duplicates": "error",
+    "import/no-mutable-exports": "error",
+    "import/no-unassigned-import": "off",
+    "react/jsx-key": "error",
+    "react/jsx-no-duplicate-props": "error",
+    "react/react-in-jsx-scope": "off",
+    "typescript/consistent-type-exports": "error",
+    "typescript/consistent-type-imports": "error",
+    "typescript/explicit-function-return-type": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-var-requires": "error",
+    "unicorn/no-process-exit": "error",
+    "unicorn/require-module-specifiers": "off"
+  },
+  "ignorePatterns": [
+    ".bun-home/**",
+    ".bun-tmp/**"
+  ],
+  "env": {
+    "builtin": true
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/*.test.ts",
+        "**/*.test.tsx"
+      ],
+      "rules": {
+        "typescript/no-non-null-assertion": "off"
+      }
+    }
+  ]
+}
