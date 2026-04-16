@@ -10,6 +10,17 @@ import { StackViewFrame } from '../../ui/layout/stack-view-frame'
 import { configureQuestionInput, configureQuestionSelect, resolveAnswer, wrapIndex } from './screen-utils'
 
 type QuestionScreenProps = { onAnswer: (answer: ToolQuestionAnswer) => void; question: ToolQuestionPrompt }
+type QuestionFreeformSectionProps = {
+	draft: string
+	freeformOptionValue: string | undefined
+	inputRef: { current: InputRenderable | null }
+	onAnswer: (answer: ToolQuestionAnswer) => void
+	onChange: (value: string) => void
+	question: ToolQuestionPrompt
+	selectedIndex: number
+	selectedOption: SelectOption | undefined
+	selectOption: ToolQuestionOption | undefined
+}
 
 type QuestionBindings = {
 	allowFreeform: boolean
@@ -25,8 +36,9 @@ export function QuestionScreen({ onAnswer, question }: QuestionScreenProps): Rea
 	const inputRef = useRef<InputRenderable | null>(null)
 	const selectRef = useRef<SelectRenderable | null>(null)
 	const bindings = useQuestionBindings(question)
+	const preferOptionFocus = !!question.freeformOptionValue
 
-	useQuestionFocus(bindings.allowFreeform, inputRef, selectRef)
+	useQuestionFocus(bindings.allowFreeform, preferOptionFocus, inputRef, selectRef)
 	useQuestionKeyboard(bindings, onAnswer, question)
 
 	return (
@@ -42,17 +54,19 @@ export function QuestionScreen({ onAnswer, question }: QuestionScreenProps): Rea
 					<QuestionFreeformSection
 						draft={bindings.draft}
 						inputRef={inputRef}
+						freeformOptionValue={question.freeformOptionValue}
 						onAnswer={onAnswer}
 						onChange={bindings.setDraft}
 						question={question}
 						selectedIndex={bindings.selectedIndex}
-						selectOption={question.options?.[bindings.selectedIndex]}
 						selectedOption={bindings.options[bindings.selectedIndex]}
+						selectOption={question.options?.[bindings.selectedIndex]}
 					/>
 				) : null}
 				{bindings.options.length > 0 ? (
 					<QuestionOptionsSection
 						allowFreeform={bindings.allowFreeform}
+						preferOptionFocus={preferOptionFocus}
 						options={bindings.options}
 						selectHeight={bindings.selectHeight}
 						selectRef={selectRef}
@@ -92,19 +106,20 @@ function useQuestionBindings(question: ToolQuestionPrompt): QuestionBindings {
 
 function useQuestionFocus(
 	allowFreeform: boolean,
+	preferOptionFocus: boolean,
 	inputRef: { current: InputRenderable | null },
 	selectRef: { current: SelectRenderable | null }
 ): void {
 	useEffect(() => {
 		setTimeout(() => {
-			if (allowFreeform) {
+			if (allowFreeform && !preferOptionFocus) {
 				inputRef.current?.focus()
 				return
 			}
 
 			selectRef.current?.focus()
 		}, 1)
-	}, [allowFreeform, inputRef, selectRef])
+	}, [allowFreeform, preferOptionFocus, inputRef, selectRef])
 }
 
 function useQuestionKeyboard(
@@ -154,6 +169,7 @@ function QuestionHeader({ question }: { question: ToolQuestionPrompt }): ReactNo
 
 function QuestionFreeformSection({
 	draft,
+	freeformOptionValue,
 	inputRef,
 	onAnswer,
 	onChange,
@@ -161,16 +177,7 @@ function QuestionFreeformSection({
 	selectedIndex,
 	selectedOption,
 	selectOption
-}: {
-	draft: string
-	inputRef: { current: InputRenderable | null }
-	onAnswer: (answer: ToolQuestionAnswer) => void
-	onChange: (value: string) => void
-	question: ToolQuestionPrompt
-	selectedIndex: number
-	selectedOption: SelectOption | undefined
-	selectOption: ToolQuestionOption | undefined
-}): ReactNode {
+}: QuestionFreeformSectionProps): ReactNode {
 	return (
 		<box
 			flexDirection='column'
@@ -178,14 +185,16 @@ function QuestionFreeformSection({
 			<text
 				fg={THEME.muted}
 				selectable={false}>
-				Type an answer and press enter.
+				{freeformOptionValue
+					? 'Choose "Other..." and type an explanation, then press enter.'
+					: 'Type an answer and press enter.'}
 			</text>
 			<AppInput
 				configureInput={renderable => configureQuestionInput(inputRef, renderable)}
 				focused
 				onChange={onChange}
 				onSubmit={() => {
-					const answer = resolveAnswer(draft, selectedOption, selectOption, true)
+					const answer = resolveAnswer(draft, selectedOption, selectOption, true, freeformOptionValue)
 					if (answer) {
 						onAnswer(answer)
 					}
@@ -204,6 +213,7 @@ function QuestionFreeformSection({
 
 function QuestionOptionsSection({
 	allowFreeform,
+	preferOptionFocus,
 	options,
 	selectHeight,
 	selectRef,
@@ -211,6 +221,7 @@ function QuestionOptionsSection({
 	setSelectedIndex
 }: {
 	allowFreeform: boolean
+	preferOptionFocus: boolean
 	options: SelectOption[]
 	selectHeight: number
 	selectRef: { current: SelectRenderable | null }
@@ -224,12 +235,14 @@ function QuestionOptionsSection({
 			<text
 				fg={THEME.muted}
 				selectable={false}>
-				Use arrows to choose an option, then press enter.
+				{preferOptionFocus
+					? 'Use arrows to choose an option. Pick "Other..." to explain.'
+					: 'Use arrows to choose an option, then press enter.'}
 			</text>
 			<AppSelect
 				configureSelect={renderable => configureQuestionSelect(selectRef, renderable)}
 				emphasized
-				focused={!allowFreeform}
+				focused={!allowFreeform || preferOptionFocus}
 				height={selectHeight}
 				onSelect={(index): void => {
 					setSelectedIndex(index)
@@ -251,7 +264,8 @@ function submitQuestionAnswer(
 		bindings.draft,
 		bindings.options[bindings.selectedIndex],
 		question.options?.[bindings.selectedIndex],
-		bindings.allowFreeform
+		bindings.allowFreeform,
+		question.freeformOptionValue
 	)
 	if (!answer) {
 		return

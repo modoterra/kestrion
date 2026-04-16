@@ -2,11 +2,13 @@ import type { ReactNode } from 'react'
 
 import type { MessageRecord } from '../../../lib/types'
 import { RHYTHM, THEME } from '../../../lib/ui/constants'
-import { compactModelName, formatTime } from '../../../lib/ui/helpers'
+import { compactModelName } from '../../../lib/ui/helpers'
 import { AGENT_MESSAGE_MARKDOWN_STYLE, AGENT_MESSAGE_MARKDOWN_TREE_SITTER_CLIENT } from '../../../lib/ui/markdown'
+import { MessageMetaLine } from './message-meta-line'
 
 type ConversationEmptyStateProps = {
 	centered?: boolean
+	missingMatrix: boolean
 	missingProvider: boolean
 	model: string
 	providerLabel: string
@@ -17,15 +19,24 @@ type ConversationEmptyStateProps = {
 type MessageBubbleProps = { assistantWidth: number | '100%'; message: MessageRecord; userWidth: number | '100%' }
 
 export function ConversationEmptyState(props: ConversationEmptyStateProps): ReactNode {
-	const { centered = false, missingProvider, model, providerLabel, sessionTitle, width } = props
+	const { centered = false, missingMatrix, missingProvider, model, providerLabel, sessionTitle, width } = props
 	const providerSummary = missingProvider ? null : `${providerLabel} · ${compactModelName(model)}`
 
 	return (
 		<EmptyStateFrame
 			centered={centered}
 			width={width}>
-			<EmptyStateLead missingProvider={missingProvider} />
-			{missingProvider ? <ProviderSetupHint /> : <EmptyStateSessionTitle title={sessionTitle} />}
+			<EmptyStateLead
+				missingMatrix={missingMatrix}
+				missingProvider={missingProvider}
+			/>
+			{missingProvider ? (
+				<ProviderSetupHint />
+			) : missingMatrix ? (
+				<MatrixSetupHint />
+			) : (
+				<EmptyStateSessionTitle title={sessionTitle} />
+			)}
 			{providerSummary ? (
 				<text
 					fg={THEME.muted}
@@ -39,7 +50,6 @@ export function ConversationEmptyState(props: ConversationEmptyStateProps): Reac
 
 export function MessageBubble({ assistantWidth, message, userWidth }: MessageBubbleProps): ReactNode {
 	const isUser = message.role === 'user'
-	const metaLine = buildMetaLine(message)
 
 	if (isUser) {
 		return (
@@ -51,11 +61,7 @@ export function MessageBubble({ assistantWidth, message, userWidth }: MessageBub
 					paddingRight={RHYTHM.panelX}
 					paddingTop={RHYTHM.panelY}
 					width={userWidth}>
-					<MessageContent
-						metaColor={THEME.muted}
-						metaLine={metaLine}
-						message={message}
-					/>
+					<MessageContent message={message} />
 				</box>
 			</MessageRow>
 		)
@@ -66,35 +72,19 @@ export function MessageBubble({ assistantWidth, message, userWidth }: MessageBub
 			<box
 				marginRight={typeof assistantWidth === 'number' ? 6 : 0}
 				width={assistantWidth}>
-				<MessageContent
-					metaColor={message.role === 'assistant' ? THEME.muted : THEME.accent}
-					metaLine={metaLine}
-					message={message}
-				/>
+				<MessageContent message={message} />
 			</box>
 		</MessageRow>
 	)
 }
 
-function MessageContent({
-	message,
-	metaColor,
-	metaLine
-}: {
-	message: MessageRecord
-	metaColor: string
-	metaLine: string
-}): ReactNode {
+function MessageContent({ message }: { message: MessageRecord }): ReactNode {
 	return (
 		<box
 			flexDirection='column'
 			gap={RHYTHM.stack}>
 			<MessageBody message={message} />
-			<text
-				fg={metaColor}
-				selectable>
-				{metaLine}
-			</text>
+			<MessageMetaLine message={message} />
 		</box>
 	)
 }
@@ -154,14 +144,39 @@ function EmptyStateFrame({
 	)
 }
 
-function EmptyStateLead({ missingProvider }: { missingProvider: boolean }): ReactNode {
-	if (!missingProvider) {
+function EmptyStateLead({
+	missingMatrix,
+	missingProvider
+}: {
+	missingMatrix: boolean
+	missingProvider: boolean
+}): ReactNode {
+	if (!missingProvider && !missingMatrix) {
 		return (
 			<text
 				fg={THEME.offWhite}
 				selectable={false}>
 				Start a conversation from the composer below.
 			</text>
+		)
+	}
+
+	if (missingMatrix) {
+		return (
+			<box
+				alignItems='center'
+				flexDirection='column'>
+				<text
+					fg={THEME.offWhite}
+					selectable={false}>
+					Setup MATRIX.md
+				</text>
+				<text
+					fg={THEME.offWhite}
+					selectable={false}>
+					to define how the agent should behave before you start chatting.
+				</text>
+			</box>
 		)
 	}
 
@@ -207,6 +222,40 @@ function ProviderSetupHint(): ReactNode {
 	)
 }
 
+function MatrixSetupHint(): ReactNode {
+	return (
+		<box
+			flexDirection='row'
+			gap={1}>
+			<text
+				fg={THEME.muted}
+				selectable={false}>
+				Use
+			</text>
+			<text
+				fg={THEME.accent}
+				selectable={false}>
+				ctrl+k
+			</text>
+			<text
+				fg={THEME.muted}
+				selectable={false}>
+				and run
+			</text>
+			<text
+				fg={THEME.accent}
+				selectable={false}>
+				Setup MATRIX.md
+			</text>
+			<text
+				fg={THEME.muted}
+				selectable={false}>
+				to continue.
+			</text>
+		</box>
+	)
+}
+
 function EmptyStateSessionTitle({ title }: { title: string }): ReactNode {
 	return (
 		<text
@@ -232,17 +281,6 @@ function MessageRow({
 			{children}
 		</box>
 	)
-}
-
-function buildMetaLine(message: MessageRecord): string {
-	const label = message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Agent' : 'System'
-	const parts = [label.toLowerCase(), formatTime(message.createdAt)]
-
-	if (message.provider && message.model) {
-		parts.push(compactModelName(message.model))
-	}
-
-	return parts.join(' · ')
 }
 
 function getMessageLines(message: MessageRecord): Array<{ key: string; text: string }> {

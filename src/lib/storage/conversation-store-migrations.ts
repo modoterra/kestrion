@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 
-import type { ProviderCatalogRecord, ProviderModelRecord } from './types'
+import type { ProviderCatalogRecord, ProviderModelRecord } from '../types'
 
 const UPSERT_PROVIDER_SQL =
 	'INSERT INTO provider_catalog (id, label, description, sort_order) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET label = excluded.label, description = excluded.description, sort_order = excluded.sort_order'
@@ -106,6 +106,11 @@ export function applyPersistentToolStorageMigration(database: Database): void {
 	database.exec('PRAGMA user_version = 4;')
 }
 
+export function applyCuratedKimiCatalogMigration(database: Database): void {
+	upsertProviderCatalog(database, MIGRATION_5_PROVIDERS, MIGRATION_5_PROVIDER_MODELS)
+	database.exec('PRAGMA user_version = 5;')
+}
+
 export function migrateAppDatabase(database: Database): void {
 	let version = (database.prepare('PRAGMA user_version').get() as { user_version?: number } | null)?.user_version ?? 0
 
@@ -126,6 +131,11 @@ export function migrateAppDatabase(database: Database): void {
 
 	if (version < 4) {
 		applyPersistentToolStorageMigration(database)
+		version = 4
+	}
+
+	if (version < 5) {
+		applyCuratedKimiCatalogMigration(database)
 	}
 }
 
@@ -136,13 +146,32 @@ function upsertProviderCatalog(
 ): void {
 	const upsertProvider = database.prepare(UPSERT_PROVIDER_SQL)
 	const upsertProviderModel = database.prepare(UPSERT_PROVIDER_MODEL_SQL)
+	const deleteProvider = database.prepare('DELETE FROM provider_catalog WHERE id = ?')
+	const deleteProviderModel = database.prepare('DELETE FROM provider_models WHERE id = ?')
 	const applySeed = database.transaction(() => {
+		const expectedProviderIds = new Set(providers.map(provider => provider.id))
+		const expectedModelIds = new Set(models.map(model => model.id))
+		const existingProviderIds = database.prepare('SELECT id FROM provider_catalog').all() as Array<{ id: string }>
+		const existingModelIds = database.prepare('SELECT id FROM provider_models').all() as Array<{ id: string }>
+
+		for (const existingModel of existingModelIds) {
+			if (!expectedModelIds.has(existingModel.id)) {
+				deleteProviderModel.run(existingModel.id)
+			}
+		}
+
 		for (const provider of providers) {
 			upsertProvider.run(provider.id, provider.label, provider.description, provider.sortOrder)
 		}
 
 		for (const model of models) {
 			upsertProviderModel.run(model.id, model.providerId, model.label, model.description, model.model, model.sortOrder)
+		}
+
+		for (const existingProvider of existingProviderIds) {
+			if (!expectedProviderIds.has(existingProvider.id)) {
+				deleteProvider.run(existingProvider.id)
+			}
 		}
 	})
 
@@ -155,46 +184,16 @@ const MIGRATION_2_PROVIDERS: ProviderCatalogRecord[] = [
 
 const MIGRATION_2_PROVIDER_MODELS: ProviderModelRecord[] = [
 	{
-		description: 'Best default for everyday conversations and general tasks',
+		description: 'Curated Kimi profile with automatic Instant and Thinking mode switching',
 		id: 'forerunner-chat',
-		label: 'Conversational',
+		label: 'Kimi K2.5',
 		model: 'accounts/fireworks/models/kimi-k2p5',
 		providerId: 'fireworks',
 		sortOrder: 1
-	},
-	{
-		description: 'Best for deeper reasoning, planning, and tricky multi-step work',
-		id: 'forerunner-thinking',
-		label: 'Thinking',
-		model: 'accounts/fireworks/models/kimi-k2-thinking',
-		providerId: 'fireworks',
-		sortOrder: 2
-	},
-	{
-		description: 'Best for screenshots, images, and visual analysis',
-		id: 'forerunner-vision',
-		label: 'Vision',
-		model: 'accounts/fireworks/models/qwen3-vl-30b-a3b-thinking',
-		providerId: 'fireworks',
-		sortOrder: 3
-	},
-	{
-		description: 'Lower-cost option for lightweight tasks and higher-volume usage',
-		id: 'forerunner-budget',
-		label: 'Budget',
-		model: 'accounts/fireworks/models/deepseek-v3p2',
-		providerId: 'fireworks',
-		sortOrder: 4
-	},
-	{
-		description: 'Alternate flagship chat model for side-by-side evaluation',
-		id: 'forerunner-premium-chat-alt',
-		label: 'Premium',
-		model: 'accounts/fireworks/models/qwen3p6-plus',
-		providerId: 'fireworks',
-		sortOrder: 5
 	}
 ]
 
 const MIGRATION_3_PROVIDERS = MIGRATION_2_PROVIDERS
 const MIGRATION_3_PROVIDER_MODELS = MIGRATION_2_PROVIDER_MODELS
+const MIGRATION_5_PROVIDERS = MIGRATION_2_PROVIDERS
+const MIGRATION_5_PROVIDER_MODELS = MIGRATION_2_PROVIDER_MODELS

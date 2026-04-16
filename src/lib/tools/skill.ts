@@ -59,14 +59,19 @@ export function runSkillTool(input: unknown, options: ToolExecutionContext = {})
 	try {
 		const argumentsValue = parseSkillArguments(input)
 		const { skillsDir } = getAppPaths(options)
+		const allowedSkillNames = options.allowedSkillNames
 
 		if (argumentsValue.action === 'list') {
-			return { items: listSkills(skillsDir).map(skill => ({ name: skill, path: join(skillsDir, skill) })), ok: true }
+			const skills = listSkills(skillsDir).filter(skill => isAllowedSkillName(skill, allowedSkillNames))
+			return { items: skills.map(skill => ({ name: skill, path: join(skillsDir, skill) })), ok: true }
 		}
 
 		const name = argumentsValue.name?.trim()
 		if (!name) {
 			throw new Error('name is required for action "invoke".')
+		}
+		if (!isAllowedSkillName(name, allowedSkillNames)) {
+			throw new Error(`Skill "${name}" is denied by policy.`)
 		}
 
 		const skillDirectory = resolveSkillDirectory(skillsDir, name)
@@ -84,6 +89,14 @@ export function runSkillTool(input: unknown, options: ToolExecutionContext = {})
 	} catch (error) {
 		return { error: getErrorMessage(error), ok: false }
 	}
+}
+
+function isAllowedSkillName(name: string, allowedSkillNames: string[] | undefined): boolean {
+	if (!allowedSkillNames) {
+		return true
+	}
+
+	return allowedSkillNames.includes(name)
 }
 
 function parseSkillArguments(input: unknown): SkillArguments {

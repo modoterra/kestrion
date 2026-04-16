@@ -30,6 +30,40 @@ export const messages = sqliteTable(
 	table => [index('idx_messages_conversation_created').on(table.conversationId, table.createdAt)]
 )
 
+export const conversationToolCalls = sqliteTable(
+	'conversation_tool_calls',
+	{
+		conversationId: text('conversation_id')
+			.notNull()
+			.references(() => conversations.id, { onDelete: 'cascade' }),
+		createdAt: text('created_at').notNull(),
+		id: text('id').primaryKey(),
+		status: text('status').notNull(),
+		toolCallsJson: text('tool_calls_json').notNull()
+	},
+	table => [index('idx_conversation_tool_calls_created').on(table.conversationId, table.createdAt)]
+)
+
+export const conversationWorkerTranscript = sqliteTable(
+	'conversation_worker_transcript',
+	{
+		conversationId: text('conversation_id')
+			.notNull()
+			.references(() => conversations.id, { onDelete: 'cascade' }),
+		createdAt: text('created_at').notNull(),
+		direction: text('direction').notNull(),
+		id: text('id').primaryKey(),
+		kind: text('kind').notNull(),
+		payloadJson: text('payload_json').notNull(),
+		sequence: integer('sequence').notNull(),
+		turnId: text('turn_id').notNull()
+	},
+	table => [
+		index('idx_conversation_worker_transcript_created').on(table.conversationId, table.createdAt),
+		index('idx_conversation_worker_transcript_turn_sequence').on(table.conversationId, table.turnId, table.sequence)
+	]
+)
+
 export const providerCatalog = sqliteTable('provider_catalog', {
 	description: text('description').notNull(),
 	id: text('id').primaryKey(),
@@ -86,4 +120,14 @@ export const toolScratchMemory = sqliteTable(
 	'tool_scratch_memory',
 	{ content: text('content').notNull(), id: integer('id').primaryKey(), updatedAt: text('updated_at').notNull() },
 	table => [check('tool_scratch_memory_id_check', sql`${table.id} = 1`)]
+)
+
+export const toolPolicy = sqliteTable(
+	'tool_policy',
+	{
+		id: integer('id').primaryKey(),
+		policyJson: text('policy_json').notNull(),
+		updatedAt: text('updated_at').notNull()
+	},
+	table => [check('tool_policy_id_check', sql`${table.id} = 1`)]
 )

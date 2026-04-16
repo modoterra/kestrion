@@ -6,7 +6,7 @@ import { drizzle, type BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 
-import { migrateAppDatabase } from '../lib/conversation-store-migrations'
+import { migrateAppDatabase } from '../lib/storage/conversation-store-migrations'
 import * as schema from './schema'
 
 export type AppDatabase = BunSQLiteDatabase<typeof schema>

@@ -2,17 +2,32 @@ import type { ReactNode } from 'react'
 
 import type { InferenceToolCall, MessageRecord } from '../../../lib/types'
 import { RHYTHM, THEME } from '../../../lib/ui/constants'
-import { compactModelName, formatTime, shortenHomePath, renderEventMeta, truncate } from '../../../lib/ui/helpers'
+import { shortenHomePath, renderEventMeta, truncate } from '../../../lib/ui/helpers'
 import { AGENT_MESSAGE_MARKDOWN_STYLE, AGENT_MESSAGE_MARKDOWN_TREE_SITTER_CLIENT } from '../../../lib/ui/markdown'
+import { ActivityIndicator } from './activity-indicator'
+import { MessageMetaLine } from './message-meta-line'
 
-type StreamingAssistantBubbleProps = { assistantWidth: number | '100%'; message: MessageRecord; spinner: string }
-type ToolActivityBubbleProps = { assistantWidth: number | '100%'; spinner: string; toolCalls: InferenceToolCall[] }
-type BusyResponseIndicatorProps = { model: string; providerLabel: string; spinner: string; width: number | '100%' }
+type StreamingAssistantBubbleProps = {
+	assistantWidth: number | '100%'
+	message: MessageRecord
+	spinnerFrameIndex: number
+}
+type ToolActivityBubbleProps = {
+	assistantWidth: number | '100%'
+	spinnerFrameIndex: number
+	toolCalls: InferenceToolCall[]
+}
+type BusyResponseIndicatorProps = {
+	model: string
+	providerLabel: string
+	spinnerFrameIndex: number
+	width: number | '100%'
+}
 
 export function StreamingAssistantBubble({
 	assistantWidth,
 	message,
-	spinner
+	spinnerFrameIndex
 }: StreamingAssistantBubbleProps): ReactNode {
 	return (
 		<AssistantBubbleFrame assistantWidth={assistantWidth}>
@@ -23,19 +38,19 @@ export function StreamingAssistantBubble({
 				<text
 					fg={THEME.accent}
 					selectable={false}>
-					responding {spinner}
+					responding <ActivityIndicator frameIndex={spinnerFrameIndex} />
 				</text>
-				<text
-					fg={THEME.muted}
-					selectable>
-					{buildMetaLine(message)}
-				</text>
+				<MessageMetaLine message={message} />
 			</box>
 		</AssistantBubbleFrame>
 	)
 }
 
-export function ToolActivityBubble({ assistantWidth, spinner, toolCalls }: ToolActivityBubbleProps): ReactNode {
+export function ToolActivityBubble({
+	assistantWidth,
+	spinnerFrameIndex,
+	toolCalls
+}: ToolActivityBubbleProps): ReactNode {
 	const toolLabel = toolCalls.length === 1 ? 'using tool' : `using ${toolCalls.length} tools`
 
 	return (
@@ -46,7 +61,11 @@ export function ToolActivityBubble({ assistantWidth, spinner, toolCalls }: ToolA
 				<text
 					fg={THEME.summaryAccent}
 					selectable={false}>
-					{toolLabel} {spinner}
+					{toolLabel}{' '}
+					<ActivityIndicator
+						frameIndex={spinnerFrameIndex}
+						variant='summary'
+					/>
 				</text>
 				{toolCalls.map(toolCall => (
 					<ToolActivityLine
@@ -59,7 +78,12 @@ export function ToolActivityBubble({ assistantWidth, spinner, toolCalls }: ToolA
 	)
 }
 
-export function BusyResponseIndicator({ model, providerLabel, spinner, width }: BusyResponseIndicatorProps): ReactNode {
+export function BusyResponseIndicator({
+	model,
+	providerLabel,
+	spinnerFrameIndex,
+	width
+}: BusyResponseIndicatorProps): ReactNode {
 	return (
 		<AssistantBubbleFrame assistantWidth={width}>
 			<box
@@ -73,7 +97,11 @@ export function BusyResponseIndicator({ model, providerLabel, spinner, width }: 
 				<text
 					fg={THEME.muted}
 					selectable={false}>
-					{renderEventMeta(providerLabel, model, spinner)}
+					{renderEventMeta(providerLabel, model)} ·{' '}
+					<ActivityIndicator
+						frameIndex={spinnerFrameIndex}
+						variant='muted'
+					/>
 				</text>
 			</box>
 		</AssistantBubbleFrame>
@@ -142,17 +170,6 @@ function ToolActivityLine({ toolCall }: { toolCall: InferenceToolCall }): ReactN
 			</text>
 		</box>
 	)
-}
-
-function buildMetaLine(message: MessageRecord): string {
-	const label = message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Agent' : 'System'
-	const parts = [label.toLowerCase(), formatTime(message.createdAt)]
-
-	if (message.provider && message.model) {
-		parts.push(compactModelName(message.model))
-	}
-
-	return parts.join(' · ')
 }
 
 function formatToolCallPreview(toolCall: InferenceToolCall): string {

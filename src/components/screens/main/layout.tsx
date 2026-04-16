@@ -1,10 +1,10 @@
 import type { ScrollBoxRenderable, TextareaRenderable } from '@opentui/core'
-import type { ReactNode, RefObject } from 'react'
+import type { ComponentProps, ReactNode, RefObject } from 'react'
 
-import type { InferenceToolCall, MessageRecord } from '../../../lib/types'
+import type { TurnActivityState } from '../../../lib/app/main-screen-turn-activity-state'
+import type { InferenceToolCall, MessageRecord, ToolCallMessageRecord } from '../../../lib/types'
 import { THEME } from '../../../lib/ui/constants'
 import { ConversationView } from '../../ui/conversation/conversation-view'
-import { FloatingNotice } from '../../ui/feedback/floating-notice'
 import { AppFooter } from '../../ui/layout/footer'
 import { AppShellLayout } from '../../ui/layout/shell-layout'
 
@@ -16,28 +16,32 @@ type MainScreenLayoutProps = {
 	composer: string
 	composerEpoch: number
 	configureComposer: (renderable: TextareaRenderable | null) => void
+	contextUsageChars: number
 	error: string | null
 	fireworksModel: string
+	fireworksProviderMode: 'custom' | 'fireworks' | null
+	maxTokens: number
 	messages: MessageRecord[]
+	missingMatrix: boolean
 	missingProvider: boolean
+	missingSetup: boolean
 	onComposerContentChange: () => void
 	onComposerSubmit: () => void
 	onMouseUp: () => void
 	pendingAssistantMessage: MessageRecord | null
+	promptTruncateLength: number
 	providerLabel: string
 	sessionTitle: string
-	spinner: string
-	status: string
+	spinnerFrameIndex: number
+	temperature: number
 	terminalWidth: number
+	toolCallMessages: ToolCallMessageRecord[]
+	turnActivity: TurnActivityState
 	transcriptRef: RefObject<ScrollBoxRenderable | null>
 	viewElement: ReactNode | null
-	viewIsActive: boolean
 }
 
-type ConversationSurfaceProps = Omit<
-	MainScreenLayoutProps,
-	'buildLabel' | 'error' | 'onMouseUp' | 'terminalWidth' | 'viewIsActive'
->
+type ConversationSurfaceProps = Omit<MainScreenLayoutProps, 'buildLabel' | 'onMouseUp' | 'terminalWidth'>
 
 export function MainScreenLayout(props: MainScreenLayoutProps): ReactNode {
 	return (
@@ -59,75 +63,49 @@ export function MainScreenLayout(props: MainScreenLayoutProps): ReactNode {
 				)}
 				terminalWidth={props.terminalWidth}
 			/>
-			<ErrorNotice
-				error={props.error}
-				viewIsActive={props.viewIsActive}
-			/>
 		</box>
 	)
 }
 
-function ConversationSurface({
-	activeConversationId,
-	busy,
-	composer,
-	composerEpoch,
-	configureComposer,
-	fireworksModel,
-	messages,
-	missingProvider,
-	onComposerContentChange,
-	onComposerSubmit,
-	pendingAssistantMessage,
-	providerLabel,
-	sessionTitle,
-	shellWidth,
-	spinner,
-	status,
-	activeToolCalls,
-	transcriptRef,
-	viewElement
-}: ConversationSurfaceProps & { shellWidth: number }): ReactNode {
-	return (
-		viewElement ?? (
-			<ConversationView
-				activeConversationId={activeConversationId}
-				busy={busy}
-				composer={composer}
-				composerEpoch={composerEpoch}
-				composerFocused
-				configureComposer={configureComposer}
-				messages={messages}
-				missingProvider={missingProvider}
-				model={fireworksModel}
-				onComposerContentChange={onComposerContentChange}
-				onComposerSubmit={onComposerSubmit}
-				pendingAssistantMessage={pendingAssistantMessage}
-				providerLabel={providerLabel}
-				sessionTitle={sessionTitle}
-				shellWidth={shellWidth}
-				spinner={spinner}
-				status={status}
-				activeToolCalls={activeToolCalls}
-				transcriptRef={transcriptRef}
-			/>
-		)
-	)
+function ConversationSurface(props: ConversationSurfaceProps & { shellWidth: number }): ReactNode {
+	if (props.viewElement) {
+		return props.viewElement
+	}
+
+	return <ConversationView {...buildConversationViewProps(props)} />
 }
 
-function ErrorNotice({ error, viewIsActive }: { error: string | null; viewIsActive: boolean }): ReactNode {
-	return error ? (
-		<FloatingNotice
-			backgroundColor={THEME.panel}
-			bottom={viewIsActive ? 3 : 7}
-			left={2}
-			right={2}
-			zIndex={40}>
-			<text
-				fg={THEME.danger}
-				selectable={false}>
-				{error}
-			</text>
-		</FloatingNotice>
-	) : null
+function buildConversationViewProps(
+	props: Omit<ConversationSurfaceProps & { shellWidth: number }, 'viewElement'>
+): ComponentProps<typeof ConversationView> {
+	return {
+		activeConversationId: props.activeConversationId,
+		activeToolCalls: props.activeToolCalls,
+		busy: props.busy,
+		composer: props.composer,
+		composerEpoch: props.composerEpoch,
+		composerFocused: true,
+		contextUsageChars: props.contextUsageChars,
+		configureComposer: props.configureComposer,
+		error: props.error,
+		maxTokens: props.maxTokens,
+		messages: props.messages,
+		missingMatrix: props.missingMatrix,
+		missingProvider: props.missingProvider,
+		missingSetup: props.missingSetup,
+		model: props.fireworksModel,
+		onComposerContentChange: props.onComposerContentChange,
+		onComposerSubmit: props.onComposerSubmit,
+		pendingAssistantMessage: props.pendingAssistantMessage,
+		promptTruncateLength: props.promptTruncateLength,
+		providerLabel: props.providerLabel,
+		providerMode: props.fireworksProviderMode,
+		sessionTitle: props.sessionTitle,
+		shellWidth: props.shellWidth,
+		spinnerFrameIndex: props.spinnerFrameIndex,
+		temperature: props.temperature,
+		toolCallMessages: props.toolCallMessages,
+		turnActivity: props.turnActivity,
+		transcriptRef: props.transcriptRef
+	}
 }

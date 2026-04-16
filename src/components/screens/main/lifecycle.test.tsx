@@ -8,8 +8,8 @@ import {
 	waitForFrameContent
 } from '../../../test/app-test-utils'
 
-afterEach(() => {
-	cleanupRenderedApp()
+afterEach(async () => {
+	await cleanupRenderedApp()
 })
 
 test('opens the selected saved session with Enter and closes the sessions view', async () => {

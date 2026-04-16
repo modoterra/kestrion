@@ -90,6 +90,7 @@ export function executeTodoTool(argumentsJson: string, options: ToolExecutionCon
 
 export function runTodoTool(input: unknown, options: ToolExecutionContext = {}): TodoResult {
 	try {
+		assertTodoAllowed(options)
 		const argumentsValue = parseTodoArguments(input)
 
 		return withToolDatabase(options, database => {
@@ -108,6 +109,12 @@ export function runTodoTool(input: unknown, options: ToolExecutionContext = {}):
 		})
 	} catch (error) {
 		return { error: getErrorMessage(error), ok: false }
+	}
+}
+
+function assertTodoAllowed(options: ToolExecutionContext): void {
+	if (options.todoAllowed === false) {
+		throw new Error('Tool "todo" is denied by policy.')
 	}
 }
 

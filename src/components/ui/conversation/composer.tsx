@@ -1,20 +1,19 @@
 import type { ReactNode } from 'react'
 
 import { RHYTHM, THEME } from '../../../lib/ui/constants'
-import { compactModelName, compactProviderName, truncate } from '../../../lib/ui/helpers'
 
 const EMPTY_BORDER = {
-	topLeft: '',
 	bottomLeft: '',
-	vertical: '',
-	topRight: '',
 	bottomRight: '',
-	horizontal: ' ',
 	bottomT: '',
-	topT: '',
 	cross: '',
+	horizontal: ' ',
 	leftT: '',
-	rightT: ''
+	rightT: '',
+	topLeft: '',
+	topRight: '',
+	topT: '',
+	vertical: ''
 } as const
 
 const SPLIT_BORDER = { ...EMPTY_BORDER, vertical: '┃' } as const
@@ -55,46 +54,25 @@ export function ComposerSurface({
 	)
 }
 
-export function ComposerModelInfo({
-	busy,
-	model,
-	providerLabel,
-	status,
-	width
+export function ComposerSetupHint({
+	height,
+	missingMatrix,
+	missingProvider
 }: {
-	busy: boolean
-	model: string
-	providerLabel: string
-	status: string
-	width: number
+	height: number
+	missingMatrix: boolean
+	missingProvider: boolean
 }): ReactNode {
-	const providerName = compactProviderName(providerLabel)
-	const modelName = compactModelName(model)
-	const busyStatus = busy ? truncate(status, Math.max(16, width - providerName.length - modelName.length - 8)) : null
-
 	return (
 		<box
-			flexDirection='row'
-			flexWrap='wrap'
-			gap={1}
-			paddingTop={RHYTHM.stack}>
-			<text
-				fg={THEME.providerBlue}
-				selectable={false}>
-				{providerName}
-			</text>
-			<text
-				fg={THEME.offWhite}
-				selectable={false}>
-				{modelName}
-			</text>
-			{busyStatus ? (
-				<text
-					fg={THEME.muted}
-					selectable={false}>
-					{busyStatus}
-				</text>
-			) : null}
+			height={height}
+			justifyContent='center'
+			width='100%'>
+			<box
+				flexDirection='row'
+				gap={1}>
+				{missingProvider ? <ProviderSetupCopy /> : missingMatrix ? <MatrixSetupCopy /> : null}
+			</box>
 		</box>
 	)
 }
@@ -115,5 +93,47 @@ function ComposerAccentTail(): ReactNode {
 				width='100%'
 			/>
 		</box>
+	)
+}
+
+function ProviderSetupCopy(): ReactNode {
+	return (
+		<>
+			<HintText>Use</HintText>
+			<HintAccent>ctrl+p</HintAccent>
+			<HintText>to setup a provider.</HintText>
+		</>
+	)
+}
+
+function MatrixSetupCopy(): ReactNode {
+	return (
+		<>
+			<HintText>Use</HintText>
+			<HintAccent>ctrl+k</HintAccent>
+			<HintText>and run</HintText>
+			<HintAccent>Setup MATRIX.md</HintAccent>
+			<HintText>to enable the composer.</HintText>
+		</>
+	)
+}
+
+function HintAccent({ children }: { children: ReactNode }): ReactNode {
+	return (
+		<text
+			fg={THEME.accent}
+			selectable={false}>
+			{children}
+		</text>
+	)
+}
+
+function HintText({ children }: { children: ReactNode }): ReactNode {
+	return (
+		<text
+			fg={THEME.muted}
+			selectable={false}>
+			{children}
+		</text>
 	)
 }

@@ -39,7 +39,7 @@ export type FetchResult = FetchErrorResult | FetchSuccessResult
 export async function executeFetchTool(argumentsJson: string, _options: ToolExecutionContext = {}): Promise<string> {
 	try {
 		const parsedArguments = JSON.parse(argumentsJson) as unknown
-		return JSON.stringify(await fetchUrl(parsedArguments))
+		return JSON.stringify(await fetchUrl(parsedArguments, _options))
 	} catch (error) {
 		return JSON.stringify({
 			error: `Invalid fetch arguments: ${getErrorMessage(error)}`,
@@ -48,9 +48,10 @@ export async function executeFetchTool(argumentsJson: string, _options: ToolExec
 	}
 }
 
-export async function fetchUrl(input: unknown): Promise<FetchResult> {
+export async function fetchUrl(input: unknown, options: ToolExecutionContext = {}): Promise<FetchResult> {
 	try {
 		const argumentsValue = parseFetchArguments(input)
+		assertFetchHostnameAllowed(argumentsValue.url, options)
 		const response = await fetch(argumentsValue.url)
 		const contentType = response.headers.get('content-type') ?? 'unknown'
 		const rawContent = await response.text()
@@ -66,6 +67,18 @@ export async function fetchUrl(input: unknown): Promise<FetchResult> {
 		}
 	} catch (error) {
 		return { error: getErrorMessage(error), ok: false, url: getFetchUrl(input) }
+	}
+}
+
+function assertFetchHostnameAllowed(url: string, options: ToolExecutionContext): void {
+	const allowedDomains = options.networkAccessPolicy?.allowedDomains
+	if (!allowedDomains || allowedDomains.length === 0) {
+		return
+	}
+
+	const hostname = new URL(url).hostname.toLowerCase()
+	if (!allowedDomains.includes(hostname)) {
+		throw new Error(`Domain "${hostname}" is denied by policy for tool "fetch".`)
 	}
 }
 

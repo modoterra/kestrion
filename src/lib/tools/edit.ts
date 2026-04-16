@@ -1,13 +1,12 @@
 import { writeFileSync } from 'node:fs'
 
 import {
+	formatToolPath,
 	getErrorMessage,
 	getRequestedPath,
 	isRecord,
-	normalizeRelativePath,
 	readWorkspaceTextFile,
-	resolveWorkspaceFilePath,
-	resolveWorkspaceRoot
+	resolveToolFilePath
 } from './common'
 import type { ToolExecutionContext } from './tool-types'
 
@@ -58,9 +57,8 @@ export function executeEditTool(argumentsJson: string, options: ToolExecutionCon
 
 export function editWorkspaceFile(input: unknown, options: ToolExecutionContext = {}): EditResult {
 	try {
-		const rootDirectory = resolveWorkspaceRoot(options.workspaceRoot)
 		const argumentsValue = parseEditArguments(input)
-		const filePath = resolveWorkspaceFilePath(rootDirectory, argumentsValue.path.trim())
+		const filePath = resolveToolFilePath(options, argumentsValue.path.trim(), { write: true })
 		const currentContent = readWorkspaceTextFile(filePath)
 		const occurrences = countOccurrences(currentContent, argumentsValue.oldText)
 
@@ -77,11 +75,17 @@ export function editWorkspaceFile(input: unknown, options: ToolExecutionContext 
 			: replaceFirstOccurrence(currentContent, argumentsValue.oldText, argumentsValue.newText)
 
 		writeFileSync(filePath, nextContent, 'utf8')
+		options.onMutation?.({
+			operation: 'write',
+			path: filePath,
+			sizeBytes: Buffer.byteLength(nextContent, 'utf8'),
+			toolName: EDIT_TOOL_NAME
+		})
 
 		return {
 			bytesWritten: Buffer.byteLength(nextContent, 'utf8'),
 			ok: true,
-			path: normalizeRelativePath(rootDirectory, filePath),
+			path: formatToolPath(options, filePath),
 			replacements: argumentsValue.replaceAll ? occurrences : 1
 		}
 	} catch (error) {

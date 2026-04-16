@@ -1,26 +1,32 @@
 import type { ScrollBoxRenderable, TextareaRenderable } from '@opentui/core'
 import type { ReactNode, RefObject } from 'react'
 
-import type { InferenceToolCall, MessageRecord } from '../../../lib/types'
+import type { TurnActivityState } from '../../../lib/app/main-screen-turn-activity-state'
+import type { InferenceToolCall, MessageRecord, ToolCallMessageRecord } from '../../../lib/types'
 import { COMPOSER_KEYBINDINGS, RHYTHM, THEME } from '../../../lib/ui/constants'
 import { AppTextarea } from '../forms/controls'
-import { ComposerModelInfo, ComposerSurface } from './composer'
-import { ConversationEmptyState, MessageBubble } from './message-bubble'
-import { PendingResponseState } from './pending-response-state'
+import { ComposerSetupHint, ComposerSurface } from './composer'
+import { ConversationEmptyState } from './message-bubble'
+import { TranscriptItems } from './transcript-items'
+import { TurnActivityRail } from './turn-activity-rail'
 
 type TranscriptPaneProps = {
+	activeConversationId: string
 	activeToolCalls: InferenceToolCall[] | null
 	assistantWidth: number | '100%'
 	busy: boolean
+	error: string | null
 	hasMessages: boolean
 	messageMeasures: { assistantWidth: number | '100%'; userWidth: number | '100%' }
 	messages: MessageRecord[]
+	missingMatrix: boolean
 	missingProvider: boolean
 	model: string
 	pendingAssistantMessage: MessageRecord | null
 	providerLabel: string
 	sessionTitle: string
-	spinner: string
+	spinnerFrameIndex: number
+	toolCallMessages: ToolCallMessageRecord[]
 	transcriptHeight: number
 	transcriptRef: RefObject<ScrollBoxRenderable | null>
 }
@@ -35,17 +41,41 @@ type ComposerPaneProps = {
 	composerHeight: number
 	composerInputRows: number
 	composerSurfaceRows: number
+	contextUsageChars: number
 	configureComposer: (renderable: TextareaRenderable | null) => void
+	missingMatrix: boolean
+	missingProvider: boolean
+	maxTokens: number
 	model: string
 	onComposerContentChange: () => void
 	onComposerSubmit: () => void
+	promptTruncateLength: number
 	providerLabel: string
+	providerMode: 'custom' | 'fireworks' | null
 	shellWidth: number
-	status: string
+	spinnerFrameIndex: number
+	temperature: number
+	turnActivity: TurnActivityState
 }
 
+type ComposerInputAreaProps = Pick<
+	ComposerPaneProps,
+	| 'activeConversationId'
+	| 'busy'
+	| 'composer'
+	| 'composerEnabled'
+	| 'composerEpoch'
+	| 'composerFocused'
+	| 'composerInputRows'
+	| 'configureComposer'
+	| 'missingMatrix'
+	| 'missingProvider'
+	| 'onComposerContentChange'
+	| 'onComposerSubmit'
+>
+
 export function TranscriptPane(props: TranscriptPaneProps): ReactNode {
-	const showCenteredEmptyState = props.missingProvider && !props.hasMessages
+	const showCenteredEmptyState = (props.missingProvider || props.missingMatrix) && !props.hasMessages
 
 	return (
 		<box
@@ -53,6 +83,7 @@ export function TranscriptPane(props: TranscriptPaneProps): ReactNode {
 			height={props.transcriptHeight}>
 			{showCenteredEmptyState ? (
 				<CenteredEmptyState
+					missingMatrix={props.missingMatrix}
 					missingProvider={props.missingProvider}
 					model={props.model}
 					providerLabel={props.providerLabel}
@@ -78,11 +109,16 @@ export function ComposerPane(props: ComposerPaneProps): ReactNode {
 				height={props.composerHeight}>
 				<ComposerSurface surfaceRows={props.composerSurfaceRows}>
 					<ComposerInputArea {...props} />
-					<ComposerModelInfo
-						busy={props.busy}
+					<TurnActivityRail
+						contextUsageChars={props.contextUsageChars}
+						maxTokens={props.maxTokens}
 						model={props.model}
+						promptTruncateLength={props.promptTruncateLength}
 						providerLabel={props.providerLabel}
-						status={props.status}
+						providerMode={props.providerMode}
+						spinnerFrameIndex={props.spinnerFrameIndex}
+						temperature={props.temperature}
+						turnActivity={props.turnActivity}
 						width={props.shellWidth}
 					/>
 				</ComposerSurface>
@@ -92,6 +128,7 @@ export function ComposerPane(props: ComposerPaneProps): ReactNode {
 }
 
 function CenteredEmptyState({
+	missingMatrix,
 	missingProvider,
 	model,
 	providerLabel,
@@ -99,6 +136,7 @@ function CenteredEmptyState({
 	transcriptHeight,
 	width
 }: {
+	missingMatrix: boolean
 	missingProvider: boolean
 	model: string
 	providerLabel: string
@@ -115,6 +153,7 @@ function CenteredEmptyState({
 			width='100%'>
 			<ConversationEmptyState
 				centered
+				missingMatrix={missingMatrix}
 				missingProvider={missingProvider}
 				model={model}
 				providerLabel={providerLabel}
@@ -141,53 +180,6 @@ function ConversationTranscript(props: TranscriptPaneProps): ReactNode {
 	)
 }
 
-function TranscriptItems({
-	activeToolCalls,
-	assistantWidth,
-	busy,
-	hasMessages,
-	messageMeasures,
-	messages,
-	missingProvider,
-	model,
-	pendingAssistantMessage,
-	providerLabel,
-	sessionTitle,
-	spinner
-}: Omit<TranscriptPaneProps, 'transcriptHeight' | 'transcriptRef'>): ReactNode {
-	return (
-		<>
-			{hasMessages ? null : (
-				<ConversationEmptyState
-					missingProvider={missingProvider}
-					model={model}
-					providerLabel={providerLabel}
-					sessionTitle={sessionTitle}
-					width={assistantWidth}
-				/>
-			)}
-			{messages.map(message => (
-				<MessageBubble
-					assistantWidth={messageMeasures.assistantWidth}
-					key={message.id}
-					message={message}
-					userWidth={messageMeasures.userWidth}
-				/>
-			))}
-			<PendingResponseState
-				activeToolCalls={activeToolCalls}
-				assistantWidth={messageMeasures.assistantWidth}
-				busy={busy}
-				model={model}
-				pendingAssistantMessage={pendingAssistantMessage}
-				providerLabel={providerLabel}
-				spinner={spinner}
-				width={assistantWidth}
-			/>
-		</>
-	)
-}
-
 function ComposerInputArea({
 	activeConversationId,
 	busy,
@@ -197,23 +189,19 @@ function ComposerInputArea({
 	composerFocused,
 	composerInputRows,
 	configureComposer,
+	missingMatrix,
+	missingProvider,
 	onComposerContentChange,
 	onComposerSubmit
-}: Pick<
-	ComposerPaneProps,
-	| 'activeConversationId'
-	| 'busy'
-	| 'composer'
-	| 'composerEnabled'
-	| 'composerEpoch'
-	| 'composerFocused'
-	| 'composerInputRows'
-	| 'configureComposer'
-	| 'onComposerContentChange'
-	| 'onComposerSubmit'
->): ReactNode {
+}: ComposerInputAreaProps): ReactNode {
 	if (!composerEnabled) {
-		return <ComposerProviderHint height={composerInputRows} />
+		return (
+			<ComposerSetupHint
+				height={composerInputRows}
+				missingMatrix={missingMatrix}
+				missingProvider={missingProvider}
+			/>
+		)
 	}
 
 	return (
@@ -228,35 +216,6 @@ function ComposerInputArea({
 			placeholder='Ask anything...'
 			textareaRef={configureComposer}
 		/>
-	)
-}
-
-function ComposerProviderHint({ height }: { height: number }): ReactNode {
-	return (
-		<box
-			height={height}
-			justifyContent='center'
-			width='100%'>
-			<box
-				flexDirection='row'
-				gap={1}>
-				<text
-					fg={THEME.muted}
-					selectable={false}>
-					Use
-				</text>
-				<text
-					fg={THEME.accent}
-					selectable={false}>
-					ctrl+p
-				</text>
-				<text
-					fg={THEME.muted}
-					selectable={false}>
-					to setup a provider.
-				</text>
-			</box>
-		</box>
 	)
 }
 

@@ -14,11 +14,13 @@ type ViewStackControls = {
 type CommandPaletteActions = {
 	createConversation: () => void
 	openMemoryView: () => void
+	openMatrixSetup: () => void
 	openProviderConfig: () => void
 	openSessionsView: () => void
 	openShortcutsView: () => void
+	openTranscriptView: () => void
 	openToolsView: () => void
-	reloadConversation: () => void
+	reloadConversation: () => Promise<void>
 }
 
 export function useCommandPaletteOverlayAction({
@@ -54,7 +56,7 @@ export function useCommandPaletteOverlayAction({
 				}
 
 				setTimeout(() => {
-					action()
+					void action()
 				}, 1)
 			}
 		})
@@ -66,9 +68,11 @@ export function useCommandPaletteOverlayAction({
 export function useCommandPaletteOptions({
 	createConversation,
 	openMemoryView,
+	openMatrixSetup,
 	openProviderConfig,
 	openSessionsView,
 	openShortcutsView,
+	openTranscriptView,
 	openToolsView,
 	reloadConversation
 }: CommandPaletteActions): CommandPaletteOption[] {
@@ -82,6 +86,12 @@ export function useCommandPaletteOptions({
 		),
 		createCommandPaletteOption('Memory', 'Browse scratch, episodic, and long-term memory', 'memory', openMemoryView),
 		createCommandPaletteOption(
+			'Setup MATRIX.md',
+			'Create or rebuild the shared agent behavior prompt',
+			'setup-matrix',
+			openMatrixSetup
+		),
+		createCommandPaletteOption(
 			'Provider settings',
 			'Edit provider and model settings',
 			'provider-settings',
@@ -93,6 +103,12 @@ export function useCommandPaletteOptions({
 			'reload-conversation',
 			reloadConversation
 		),
+		createCommandPaletteOption(
+			'Transcript',
+			'Browse daemon and worker wire traffic for the active conversation',
+			'transcript',
+			openTranscriptView
+		),
 		createCommandPaletteOption('Tools', 'Browse built-in tool capabilities and schemas', 'tools', openToolsView),
 		createCommandPaletteOption('Shortcuts', 'Browse available keyboard shortcuts', 'shortcuts', openShortcutsView)
 	]
@@ -102,7 +118,7 @@ function createCommandPaletteOption(
 	title: string,
 	description: string,
 	value: string,
-	run: () => void
+	run: () => void | Promise<void>
 ): CommandPaletteOption {
 	return { description, run, title, value }
 }

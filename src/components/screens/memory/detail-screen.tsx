@@ -1,6 +1,11 @@
 import type { ReactNode } from 'react'
 
-import { getMemoryLabel, type MemoryKind, type MemorySnapshot, type StoredMemoryEntry } from '../../../lib/memory-store'
+import {
+	getMemoryLabel,
+	type MemoryKind,
+	type MemorySnapshot,
+	type StoredMemoryEntry
+} from '../../../lib/storage/memory-store'
 import { RHYTHM, THEME } from '../../../lib/ui/constants'
 import { formatTime, truncate } from '../../../lib/ui/helpers'
 import { StackViewFrame } from '../../ui/layout/stack-view-frame'

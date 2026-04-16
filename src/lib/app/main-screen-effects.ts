@@ -1,9 +1,8 @@
 import type { ScrollBoxRenderable, TextareaRenderable } from '@opentui/core'
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 
-import type { InferenceToolCall, MessageRecord } from '../types'
-
-const SPINNER_FRAMES = ['o..', '.o.', '..o']
+import type { InferenceToolCall, MessageRecord, ToolCallMessageRecord } from '../types'
+import { getActivityIndicatorFrameCount } from '../ui/activity-indicator'
 
 export function useMainScreenEffects({
 	activeConversationId,
@@ -12,9 +11,10 @@ export function useMainScreenEffects({
 	composerEpoch,
 	composerRef,
 	deferredMessageCount,
-	missingProvider,
+	missingSetup,
 	pendingAssistantMessage,
 	setSpinnerFrameIndex,
+	toolCallMessages,
 	transcriptRef,
 	viewStackIsActive
 }: {
@@ -24,26 +24,24 @@ export function useMainScreenEffects({
 	composerEpoch: number
 	composerRef: MutableRefObject<TextareaRenderable | null>
 	deferredMessageCount: number
-	missingProvider: boolean
+	missingSetup: boolean
 	pendingAssistantMessage: MessageRecord | null
 	setSpinnerFrameIndex: Dispatch<SetStateAction<number>>
+	toolCallMessages: ToolCallMessageRecord[]
 	transcriptRef: MutableRefObject<ScrollBoxRenderable | null>
 	viewStackIsActive: boolean
 }): void {
 	useSpinnerFrameEffect(busy, setSpinnerFrameIndex)
-	useComposerFocusEffect(busy, composerEpoch, composerRef, missingProvider, viewStackIsActive)
+	useComposerFocusEffect(busy, composerEpoch, composerRef, missingSetup, viewStackIsActive)
 	useTranscriptScrollEffect(
 		activeConversationId,
 		activeToolCalls,
 		busy,
 		deferredMessageCount,
 		pendingAssistantMessage,
+		toolCallMessages,
 		transcriptRef
 	)
-}
-
-export function getSpinnerFrame(spinnerFrameIndex: number): string {
-	return SPINNER_FRAMES[spinnerFrameIndex] ?? SPINNER_FRAMES[0] ?? 'o..'
 }
 
 function useSpinnerFrameEffect(busy: boolean, setSpinnerFrameIndex: Dispatch<SetStateAction<number>>): void {
@@ -54,7 +52,7 @@ function useSpinnerFrameEffect(busy: boolean, setSpinnerFrameIndex: Dispatch<Set
 		}
 
 		const timer = setInterval(() => {
-			setSpinnerFrameIndex(value => (value + 1) % SPINNER_FRAMES.length)
+			setSpinnerFrameIndex(value => (value + 1) % getActivityIndicatorFrameCount())
 		}, 120)
 
 		return function cleanupSpinnerFrameTimer(): void {
@@ -67,11 +65,11 @@ function useComposerFocusEffect(
 	busy: boolean,
 	composerEpoch: number,
 	composerRef: MutableRefObject<TextareaRenderable | null>,
-	missingProvider: boolean,
+	missingSetup: boolean,
 	viewStackIsActive: boolean
 ): void {
 	useEffect(() => {
-		if (busy || missingProvider || viewStackIsActive) {
+		if (busy || missingSetup || viewStackIsActive) {
 			return
 		}
 
@@ -87,7 +85,7 @@ function useComposerFocusEffect(
 		return function cleanupComposerFocusTimer(): void {
 			clearTimeout(timer)
 		}
-	}, [busy, composerEpoch, composerRef, missingProvider, viewStackIsActive])
+	}, [busy, composerEpoch, composerRef, missingSetup, viewStackIsActive])
 }
 
 function useTranscriptScrollEffect(
@@ -96,9 +94,18 @@ function useTranscriptScrollEffect(
 	busy: boolean,
 	deferredMessageCount: number,
 	pendingAssistantMessage: MessageRecord | null,
+	toolCallMessages: ToolCallMessageRecord[],
 	transcriptRef: MutableRefObject<ScrollBoxRenderable | null>
 ): void {
 	useEffect(() => {
 		transcriptRef.current?.scrollTo({ x: 0, y: transcriptRef.current.scrollHeight })
-	}, [activeConversationId, activeToolCalls, busy, deferredMessageCount, pendingAssistantMessage, transcriptRef])
+	}, [
+		activeConversationId,
+		activeToolCalls,
+		busy,
+		deferredMessageCount,
+		pendingAssistantMessage,
+		toolCallMessages,
+		transcriptRef
+	])
 }

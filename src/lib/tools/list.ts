@@ -1,14 +1,13 @@
 import { readdirSync, statSync } from 'node:fs'
 
 import {
+	formatToolPath,
 	getErrorMessage,
 	getRequestedPath,
 	isRecord,
-	normalizeRelativePath,
 	parseOptionalBoolean,
 	parseOptionalPositiveInteger,
-	resolveWorkspacePath,
-	resolveWorkspaceRoot
+	resolveToolDirectoryPath
 } from './common'
 import type { ToolExecutionContext } from './tool-types'
 
@@ -56,11 +55,8 @@ export function executeListTool(argumentsJson: string, options: ToolExecutionCon
 
 export function listWorkspacePaths(input: unknown, options: ToolExecutionContext = {}): ListResult {
 	try {
-		const rootDirectory = resolveWorkspaceRoot(options.workspaceRoot)
 		const argumentsValue = parseListArguments(input)
-		const directoryPath = argumentsValue.path?.trim()
-			? resolveWorkspacePath(rootDirectory, argumentsValue.path.trim())
-			: rootDirectory
+		const directoryPath = resolveToolDirectoryPath(options, argumentsValue.path)
 		if (!statSync(directoryPath).isDirectory()) {
 			throw new Error(`Path is not a directory: ${argumentsValue.path ?? '.'}`)
 		}
@@ -79,7 +75,7 @@ export function listWorkspacePaths(input: unknown, options: ToolExecutionContext
 			})
 			.map<ListEntry>(entry => ({
 				name: entry.name,
-				path: normalizeRelativePath(rootDirectory, `${directoryPath}/${entry.name}`),
+				path: formatToolPath(options, `${directoryPath}/${entry.name}`),
 				type: entry.isDirectory() ? 'directory' : 'file'
 			}))
 			.toSorted((left, right) => left.path.localeCompare(right.path))
@@ -88,7 +84,7 @@ export function listWorkspacePaths(input: unknown, options: ToolExecutionContext
 		return {
 			entries: entries.slice(0, maxResults),
 			ok: true,
-			path: normalizeRelativePath(rootDirectory, directoryPath) || '.',
+			path: formatToolPath(options, directoryPath),
 			truncated: entries.length > maxResults
 		}
 	} catch (error) {

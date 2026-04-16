@@ -2,19 +2,7 @@ import type { MutableRefObject } from 'react'
 
 import { useKeyboardHandler } from '../ui/keyboard'
 
-export function useMainScreenKeyboard({
-	busy,
-	createConversation,
-	destroyRenderer,
-	inFlightRequest,
-	openCommandPalette,
-	openMemoryView,
-	openProviderConfig,
-	openSessionsView,
-	openShortcutsView,
-	openToolsView,
-	viewStackIsActive
-}: {
+type MainScreenKeyboardArgs = {
 	busy: boolean
 	createConversation: () => void
 	destroyRenderer: () => void
@@ -25,29 +13,23 @@ export function useMainScreenKeyboard({
 	openSessionsView: () => void
 	openShortcutsView: () => void
 	openToolsView: () => void
+	openTranscriptView: () => void
 	viewStackIsActive: boolean
-}): void {
+}
+
+type MainScreenShortcutActions = Omit<
+	MainScreenKeyboardArgs,
+	'destroyRenderer' | 'inFlightRequest' | 'viewStackIsActive'
+>
+
+export function useMainScreenKeyboard(args: MainScreenKeyboardArgs): void {
 	useKeyboardHandler(
 		key => {
-			if (handleExitKey(key, destroyRenderer, inFlightRequest)) {
+			if (handleExitKey(key, args.destroyRenderer, args.inFlightRequest) || args.viewStackIsActive) {
 				return
 			}
 
-			if (viewStackIsActive) {
-				return
-			}
-
-			handleViewShortcutKey(
-				key,
-				busy,
-				createConversation,
-				openCommandPalette,
-				openMemoryView,
-				openProviderConfig,
-				openSessionsView,
-				openShortcutsView,
-				openToolsView
-			)
+			handleViewShortcutKey(key, args.busy, args)
 		},
 		{ priority: 0 }
 	)
@@ -70,49 +52,42 @@ function handleExitKey(
 function handleViewShortcutKey(
 	key: { ctrl?: boolean; name: string },
 	busy: boolean,
-	createConversation: () => void,
-	openCommandPalette: () => void,
-	openMemoryView: () => void,
-	openProviderConfig: () => void,
-	openSessionsView: () => void,
-	openShortcutsView: () => void,
-	openToolsView: () => void
+	actions: MainScreenShortcutActions
 ): void {
-	if (key.ctrl && key.name === 'k') {
-		openCommandPalette()
+	if (!key.ctrl) {
 		return
 	}
 
-	if (key.ctrl && key.name === 'p') {
-		openProviderConfig()
-		return
-	}
-
-	if (key.ctrl && key.name === 'm') {
-		if (!busy) {
-			openMemoryView()
-		}
-		return
-	}
-
-	if (key.ctrl && key.name === 'n') {
-		createConversation()
-		return
-	}
-
-	if (key.ctrl && key.name === 'r') {
-		if (!busy) {
-			openSessionsView()
-		}
-		return
-	}
-
-	if (key.ctrl && key.name === 'g') {
-		openShortcutsView()
-		return
-	}
-
-	if (key.ctrl && key.name === 't') {
-		openToolsView()
+	switch (key.name) {
+		case 'g':
+			actions.openShortcutsView()
+			return
+		case 'k':
+			actions.openCommandPalette()
+			return
+		case 'm':
+			if (!busy) {
+				actions.openMemoryView()
+			}
+			return
+		case 'n':
+			actions.createConversation()
+			return
+		case 'p':
+			actions.openProviderConfig()
+			return
+		case 'r':
+			if (!busy) {
+				actions.openSessionsView()
+			}
+			return
+		case 't':
+			actions.openToolsView()
+			return
+		case 'y':
+			actions.openTranscriptView()
+			return
+		default:
+			break
 	}
 }

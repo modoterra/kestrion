@@ -1,17 +1,24 @@
+/* eslint-disable max-lines-per-function */
+
 import { useRenderer, useTerminalDimensions } from '@opentui/react'
 import { useCallback, useRef, type ReactNode } from 'react'
 
-import { getSpinnerFrame } from '../../../lib/app/main-screen-effects'
 import { useMainScreenKeyboard } from '../../../lib/app/main-screen-keyboard'
 import type { AppProps } from '../../../lib/app/types'
 import { copySelectedText } from '../../../lib/clipboard'
+import { buildRuntimeSystemPrompt } from '../../../lib/inference/system-prompt'
 import { MainScreenLayout } from './layout'
 import { useMainScreenController, type MainScreenController } from './use-screen-controller'
+import { WorkerTranscriptProvider } from './worker-transcript-context'
 
 export function MainScreen(props: AppProps): ReactNode {
 	const renderer = useRenderer()
 	const { width } = useTerminalDimensions()
 	const controller = useMainScreenController(props)
+	const contextUsageChars = getConversationContextUsage(
+		controller.deferredMessages,
+		controller.resolvedConfig.systemPrompt
+	)
 	const handleMouseUp = useStableEvent((): void => {
 		void copySelectedText(renderer)
 		controller.focusComposer()
@@ -25,31 +32,51 @@ export function MainScreen(props: AppProps): ReactNode {
 	useScreenKeyboard(controller, props.onExit, renderer)
 
 	return (
-		<MainScreenLayout
+		<WorkerTranscriptProvider
 			activeConversationId={controller.activeThread.conversation.id}
-			buildLabel={props.buildLabel}
-			busy={controller.busy}
-			composer={controller.composer}
-			composerEpoch={controller.composerEpoch}
-			configureComposer={controller.configureComposer}
-			error={controller.error}
-			fireworksModel={controller.fireworksModel}
-			activeToolCalls={controller.activeToolCalls}
-			messages={controller.deferredMessages}
-			missingProvider={controller.missingProvider}
-			onComposerContentChange={handleComposerContentChange}
-			onComposerSubmit={handleComposerSubmit}
-			onMouseUp={handleMouseUp}
-			providerLabel={controller.providerLabel}
-			pendingAssistantMessage={controller.pendingAssistantMessage}
 			sessionTitle={controller.activeThread.conversation.title}
-			spinner={getSpinnerFrame(controller.spinnerFrameIndex)}
-			status={controller.status}
-			terminalWidth={width}
-			transcriptRef={controller.transcriptRef}
-			viewElement={controller.viewStack.current?.element ?? null}
-			viewIsActive={controller.viewStack.isActive}
-		/>
+			workerTranscriptEntries={controller.workerTranscriptEntries}
+			workerTranscriptLoading={controller.workerTranscriptLoading}>
+			<MainScreenLayout
+				activeConversationId={controller.activeThread.conversation.id}
+				buildLabel={props.buildLabel}
+				busy={controller.busy}
+				composer={controller.composer}
+				composerEpoch={controller.composerEpoch}
+				configureComposer={controller.configureComposer}
+				contextUsageChars={contextUsageChars}
+				error={controller.error}
+				fireworksModel={controller.fireworksModel}
+				fireworksProviderMode={controller.resolvedConfig.providers.fireworks.providerMode}
+				activeToolCalls={controller.activeToolCalls}
+				maxTokens={controller.resolvedConfig.providers.fireworks.maxTokens}
+				messages={controller.deferredMessages}
+				missingMatrix={controller.missingMatrix}
+				missingProvider={controller.missingProvider}
+				missingSetup={controller.missingSetup}
+				onComposerContentChange={handleComposerContentChange}
+				onComposerSubmit={handleComposerSubmit}
+				onMouseUp={handleMouseUp}
+				providerLabel={controller.providerLabel}
+				pendingAssistantMessage={controller.pendingAssistantMessage}
+				promptTruncateLength={controller.resolvedConfig.providers.fireworks.promptTruncateLength}
+				sessionTitle={controller.activeThread.conversation.title}
+				spinnerFrameIndex={controller.spinnerFrameIndex}
+				temperature={controller.resolvedConfig.providers.fireworks.temperature}
+				terminalWidth={width}
+				toolCallMessages={controller.toolCallMessages}
+				turnActivity={controller.turnActivity}
+				transcriptRef={controller.transcriptRef}
+				viewElement={controller.viewStack.current?.element ?? null}
+			/>
+		</WorkerTranscriptProvider>
+	)
+}
+
+function getConversationContextUsage(messages: MainScreenController['deferredMessages'], systemPrompt: string): number {
+	return (
+		buildRuntimeSystemPrompt(systemPrompt).length +
+		messages.reduce((total, message) => total + message.content.length, 0)
 	)
 }
 
@@ -84,6 +111,7 @@ function useScreenKeyboard(
 		openProviderConfig: controller.openProviderConfig,
 		openSessionsView: controller.openSessionsView,
 		openShortcutsView: controller.openShortcutsView,
+		openTranscriptView: controller.openTranscriptView,
 		openToolsView: controller.openToolsView,
 		viewStackIsActive: controller.viewStack.isActive
 	})

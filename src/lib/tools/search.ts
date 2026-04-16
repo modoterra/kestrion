@@ -1,14 +1,13 @@
 import { statSync } from 'node:fs'
-import { resolve } from 'node:path'
 
 import {
+	formatToolPath,
 	getErrorMessage,
 	getRequestedPath,
 	isRecord,
-	normalizeRelativePath,
-	resolveWorkspacePath,
-	resolveWorkspaceRoot,
-	walkWorkspaceFiles
+	resolveToolDirectoryPath,
+	resolveToolFilePath,
+	walkToolFiles
 } from './common'
 import type { ToolExecutionContext } from './tool-types'
 
@@ -56,9 +55,8 @@ export function executeSearchTool(argumentsJson: string, options: ToolExecutionC
 
 export function searchWorkspacePaths(input: unknown, options: ToolExecutionContext = {}): SearchResult {
 	try {
-		const rootDirectory = resolveWorkspaceRoot(options.workspaceRoot)
 		const argumentsValue = parseSearchArguments(input)
-		const matches = filterSearchMatches(getCandidatePaths(rootDirectory, argumentsValue.path), argumentsValue)
+		const matches = filterSearchMatches(getCandidatePaths(options, argumentsValue.path), argumentsValue)
 		const maxResults = argumentsValue.maxResults ?? DEFAULT_MAX_RESULTS
 
 		return {
@@ -109,19 +107,17 @@ function parseSearchArguments(input: unknown): SearchArguments {
 	return { caseSensitive, maxResults, path, query: query.trim() }
 }
 
-function getCandidatePaths(rootDirectory: string, path?: string): string[] {
+function getCandidatePaths(options: ToolExecutionContext, path?: string): string[] {
 	if (!path?.trim()) {
-		return walkWorkspaceFiles(rootDirectory)
+		return walkToolFiles(resolveToolDirectoryPath(options), options)
 	}
 
-	const absolutePath = resolveWorkspacePath(rootDirectory, path.trim())
+	const absolutePath = resolveToolDirectoryPath(options, path.trim())
 	const stats = statSync(absolutePath)
 
 	if (stats.isDirectory()) {
-		return walkWorkspaceFiles(absolutePath).map(filePath =>
-			normalizeRelativePath(rootDirectory, resolve(absolutePath, filePath))
-		)
+		return walkToolFiles(absolutePath, options)
 	}
 
-	return [normalizeRelativePath(rootDirectory, absolutePath)]
+	return [formatToolPath(options, resolveToolFilePath(options, path.trim()))]
 }

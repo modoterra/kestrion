@@ -14,7 +14,7 @@ type ProviderConfigViewProps = {
 	fireworksModels: ProviderModelRecord[]
 	initialDraft: ProviderDraft
 	onReset: () => void
-	onSave: (draft: ProviderDraft) => string | null
+	onSave: (draft: ProviderDraft) => Promise<string | null>
 }
 
 export function ProviderConfigScreen(props: ProviderConfigViewProps): ReactNode {

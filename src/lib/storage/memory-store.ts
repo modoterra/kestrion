@@ -1,8 +1,8 @@
 import { desc, eq } from 'drizzle-orm'
 
-import { toolMemoryEntries, toolScratchMemory } from '../db/schema'
+import { toolMemoryEntries, toolScratchMemory } from '../../db/schema'
+import type { AppPaths } from '../paths'
 import { openAppDatabaseConnectionWithDrizzle } from './app-database'
-import type { AppPaths } from './paths'
 
 export type MemoryKind = 'episodic' | 'long-term' | 'scratch'
 export type StoredMemoryEntry = { content: string; createdAt: string; id: string; tags: string[]; title: string }

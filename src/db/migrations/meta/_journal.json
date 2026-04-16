@@ -1,5 +1,16 @@
 {
 	"version": "7",
 	"dialect": "sqlite",
-	"entries": [{ "idx": 0, "version": "6", "when": 1776192759546, "tag": "0000_flaky_mach_iv", "breakpoints": true }]
+	"entries": [
+		{ "idx": 0, "version": "6", "when": 1776192759546, "tag": "0000_flaky_mach_iv", "breakpoints": true },
+		{ "idx": 1, "version": "6", "when": 1776283200000, "tag": "0001_conversation_tool_calls", "breakpoints": true },
+		{
+			"idx": 2,
+			"version": "6",
+			"when": 1776286800000,
+			"tag": "0002_conversation_worker_transcript",
+			"breakpoints": true
+		},
+		{ "idx": 3, "version": "6", "when": 1776301200000, "tag": "0003_tool_policy", "breakpoints": true }
+	]
 }

@@ -38,6 +38,7 @@ export const SHORTCUTS = [
 	{ command: 'ctrl+m', description: 'browse memories', footerLabel: 'memory' },
 	{ command: 'ctrl+n', description: 'start a new session', footerLabel: 'new' },
 	{ command: 'ctrl+t', description: 'browse tools' },
+	{ command: 'ctrl+y', description: 'show wire transcript', footerLabel: 'transcript' },
 	{ command: 'ctrl+k', description: 'open commands', footerLabel: 'commands' },
 	{ command: 'ctrl+p', description: 'open providers', footerLabel: 'provider' },
 	{ command: 'ctrl+g', description: 'show shortcuts', footerLabel: 'shortcuts' },

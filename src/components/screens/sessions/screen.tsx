@@ -10,9 +10,9 @@ type KeyboardEventLike = { ctrl?: boolean; name: string; raw?: string; sequence?
 type SessionsViewProps = {
 	conversations: ConversationSummary[]
 	currentConversationId: string
-	onDelete: (conversationId: string) => void
-	onDeleteAll: () => void
-	onOpen: (conversationId: string) => void
+	onDelete: (conversationId: string) => Promise<void>
+	onDeleteAll: () => Promise<void>
+	onOpen: (conversationId: string) => Promise<void>
 }
 
 export function SessionsScreen(props: SessionsViewProps): ReactNode {
@@ -48,10 +48,10 @@ export function SessionsScreen(props: SessionsViewProps): ReactNode {
 		<ViewSelect
 			onDeleteAll={() => resetConversations(setItems, onDeleteAll)}
 			onDeleteCurrent={option => {
-				deleteConversation(String(option.value), setItems, onDelete)
+				void deleteConversation(String(option.value), setItems, onDelete)
 			}}
 			onSelect={option => {
-				onOpen(String(option.value))
+				void onOpen(String(option.value))
 			}}
 			options={options}
 			placeholder='Search sessions'
@@ -60,18 +60,21 @@ export function SessionsScreen(props: SessionsViewProps): ReactNode {
 	)
 }
 
-function resetConversations(setItems: Dispatch<SetStateAction<ConversationSummary[]>>, onDeleteAll: () => void): void {
+function resetConversations(
+	setItems: Dispatch<SetStateAction<ConversationSummary[]>>,
+	onDeleteAll: () => Promise<void>
+): void {
 	setItems([])
-	onDeleteAll()
+	void onDeleteAll()
 }
 
-function deleteConversation(
+async function deleteConversation(
 	conversationId: string,
 	setItems: Dispatch<SetStateAction<ConversationSummary[]>>,
-	onDelete: (conversationId: string) => void
-): void {
+	onDelete: (conversationId: string) => Promise<void>
+): Promise<void> {
 	setItems(current => current.filter(conversation => conversation.id !== conversationId))
-	onDelete(conversationId)
+	await onDelete(conversationId)
 }
 
 function isCloseSessionsKey(key: KeyboardEventLike): boolean {

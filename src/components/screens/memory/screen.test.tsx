@@ -8,8 +8,8 @@ import {
 	waitForFrameContent
 } from '../../../test/app-test-utils'
 
-afterEach(() => {
-	cleanupRenderedApp()
+afterEach(async () => {
+	await cleanupRenderedApp()
 })
 
 test('opens the memory view with Ctrl+M and shows saved memory buckets', async () => {

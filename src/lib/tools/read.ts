@@ -1,12 +1,11 @@
 import {
+	formatToolPath,
 	getErrorMessage,
 	getRequestedPath,
 	isRecord,
-	normalizeRelativePath,
 	parseOptionalPositiveInteger,
 	readWorkspaceTextFile,
-	resolveWorkspaceFilePath,
-	resolveWorkspaceRoot,
+	resolveToolFilePath,
 	splitLines
 } from './common'
 import type { ToolExecutionContext } from './tool-types'
@@ -72,12 +71,11 @@ export function readFileFromWorkspace(input: unknown, options: ToolExecutionCont
 }
 
 function buildReadSuccessResult(input: unknown, options: ToolExecutionContext = {}): ReadSuccessResult {
-	const rootDirectory = resolveWorkspaceRoot(options.workspaceRoot)
 	const argumentsValue = parseReadArguments(input)
-	const filePath = resolveWorkspaceFilePath(rootDirectory, argumentsValue.path.trim())
+	const filePath = resolveToolFilePath(options, argumentsValue.path.trim())
 	const lines = splitLines(readWorkspaceTextFile(filePath))
 	const totalLines = lines.length
-	const normalizedPath = normalizeRelativePath(rootDirectory, filePath)
+	const normalizedPath = formatToolPath(options, filePath)
 
 	if (totalLines === 0) {
 		return { content: '', endLine: 0, ok: true, path: normalizedPath, startLine: 1, totalLines, truncated: false }

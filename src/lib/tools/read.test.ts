@@ -43,6 +43,22 @@ test('rejects paths outside the workspace root', () => {
 	expect(result.error).toContain('outside the workspace root')
 })
 
+test('reads from an explicitly allowed config root under sandbox policy', () => {
+	const agentRoot = createTemporaryDirectory('kestrion-read-agent-')
+	const configRoot = createTemporaryDirectory('kestrion-read-config-')
+	writeFileSync(join(configRoot, 'config.json'), '{"provider":"fireworks"}\n')
+
+	const result = JSON.parse(
+		executeReadTool(JSON.stringify({ path: join(configRoot, 'config.json') }), {
+			fileAccessPolicy: { defaultReadRoot: agentRoot, readRoots: [agentRoot, configRoot], writeRoots: [agentRoot] }
+		})
+	) as { content: string; ok: boolean; path: string }
+
+	expect(result.ok).toBe(true)
+	expect(result.path).toBe(join(configRoot, 'config.json'))
+	expect(result.content).toContain('"provider"')
+})
+
 function createTemporaryDirectory(prefix: string): string {
 	const path = mkdtempSync(join(tmpdir(), prefix))
 	cleanupPaths.push(path)

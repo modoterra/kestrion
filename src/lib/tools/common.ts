@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
 
 import type { AppPaths } from '../paths'
-import type { ToolExecutionContext } from './tool-types'
+import type { ToolExecutionContext, ToolFileAccessPolicy } from './tool-types'
 
 const IGNORED_DIRECTORIES = new Set(['.git', 'node_modules'])
 
@@ -32,6 +32,25 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function normalizeRelativePath(rootDirectory: string, targetPath: string): string {
 	return relative(rootDirectory, targetPath).replaceAll('\\', '/')
+}
+
+export function formatToolPath(context: ToolExecutionContext, path: string): string {
+	const policy = context.fileAccessPolicy
+	if (!policy) {
+		const rootDirectory = resolveWorkspaceRoot(context.workspaceRoot)
+		return normalizeRelativePath(rootDirectory, path) || '.'
+	}
+
+	if (path === policy.defaultReadRoot) {
+		return '.'
+	}
+
+	const relativePath = relative(policy.defaultReadRoot, path).replaceAll('\\', '/')
+	if (!relativePath.startsWith('..') && !isAbsolute(relativePath)) {
+		return relativePath || '.'
+	}
+
+	return path
 }
 
 export function parseOptionalBoolean(value: unknown, fieldName: string): boolean | undefined {
@@ -85,6 +104,48 @@ export function resolveWorkspaceFilePath(
 	return normalizedPath
 }
 
+export function resolveToolDirectoryPath(
+	context: ToolExecutionContext,
+	requestedPath?: string,
+	options: { allowMissing?: boolean; write?: boolean } = {}
+): string {
+	const policy = context.fileAccessPolicy
+	if (!policy) {
+		const rootDirectory = resolveWorkspaceRoot(context.workspaceRoot)
+		return requestedPath?.trim()
+			? resolveWorkspacePath(rootDirectory, requestedPath.trim(), { allowMissing: options.allowMissing })
+			: rootDirectory
+	}
+
+	const path = requestedPath?.trim() || policy.defaultReadRoot
+	return resolveFileAccessPath(policy, path, { allowMissing: options.allowMissing, write: options.write })
+}
+
+export function resolveToolFilePath(
+	context: ToolExecutionContext,
+	requestedPath: string,
+	options: { allowMissing?: boolean; write?: boolean } = {}
+): string {
+	const policy = context.fileAccessPolicy
+	if (!policy) {
+		const rootDirectory = resolveWorkspaceRoot(context.workspaceRoot)
+		return resolveWorkspaceFilePath(rootDirectory, requestedPath, { allowMissing: options.allowMissing })
+	}
+
+	const filePath = resolveFileAccessPath(policy, requestedPath, {
+		allowMissing: options.allowMissing,
+		write: options.write
+	})
+	if (!options.allowMissing) {
+		const stats = statSync(filePath)
+		if (!stats.isFile()) {
+			throw new Error(`Path is not a file: ${requestedPath}`)
+		}
+	}
+
+	return filePath
+}
+
 export function readWorkspaceTextFile(filePath: string): string {
 	const fileBuffer = readFileSync(filePath)
 	if (fileBuffer.includes(0)) {
@@ -107,6 +168,10 @@ export function splitLines(content: string): string[] {
 
 export function walkWorkspaceFiles(rootDirectory: string): string[] {
 	return collectWorkspaceFilePaths(rootDirectory).map(path => normalizeRelativePath(rootDirectory, path))
+}
+
+export function walkToolFiles(rootDirectory: string, context: ToolExecutionContext): string[] {
+	return collectWorkspaceFilePaths(rootDirectory).map(path => formatToolPath(context, path))
 }
 
 function assertPathIsInsideWorkspace(rootDirectory: string, candidatePath: string, requestedPath: string): void {
@@ -142,6 +207,18 @@ function collectWorkspaceFilePaths(currentDirectory: string): string[] {
 	return files
 }
 
+function assertPathIsInsideRoots(candidatePath: string, allowedRoots: string[], requestedPath: string): string {
+	const realCandidatePath = existsSync(candidatePath) ? realpathSync(candidatePath) : candidatePath
+	for (const allowedRoot of allowedRoots) {
+		const relativePath = relative(allowedRoot, realCandidatePath)
+		if (!relativePath.startsWith('..') && !isAbsolute(relativePath)) {
+			return realCandidatePath
+		}
+	}
+
+	throw new Error(`Path is outside the allowed roots: ${requestedPath}`)
+}
+
 function requireExistingPath(candidatePath: string, requestedPath: string): string {
 	if (!existsSync(candidatePath)) {
 		throw new Error(`Path not found: ${requestedPath}`)
@@ -160,4 +237,31 @@ export function resolveWorkspacePath(
 	assertPathIsInsideWorkspace(rootDirectory, resolvedPath, requestedPath)
 
 	return resolvedPath
+}
+
+function resolveFileAccessPath(
+	policy: ToolFileAccessPolicy,
+	requestedPath: string,
+	options: { allowMissing?: boolean; write?: boolean } = {}
+): string {
+	const allowedRoots = options.write ? policy.writeRoots : policy.readRoots
+	const candidatePath = isAbsolute(requestedPath)
+		? resolve(requestedPath)
+		: resolve(policy.defaultReadRoot, requestedPath)
+
+	if (options.allowMissing) {
+		if (existsSync(candidatePath)) {
+			return assertPathIsInsideRoots(realpathSync(candidatePath), allowedRoots, requestedPath)
+		}
+
+		const parentDirectory = realpathSync(dirname(candidatePath))
+		assertPathIsInsideRoots(parentDirectory, allowedRoots, requestedPath)
+		return resolve(parentDirectory, basename(candidatePath))
+	}
+
+	if (!existsSync(candidatePath)) {
+		throw new Error(`Path not found: ${requestedPath}`)
+	}
+
+	return assertPathIsInsideRoots(realpathSync(candidatePath), allowedRoots, requestedPath)
 }

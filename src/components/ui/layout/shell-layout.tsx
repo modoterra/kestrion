@@ -45,6 +45,7 @@ export function AppShellLayout({
 			</ShellSection>
 			<ShellSection
 				flexShrink={0}
+				paddingTop={RHYTHM.stack}
 				shellWidth={shellWidth}>
 				{renderFooter(shellWidth)}
 			</ShellSection>

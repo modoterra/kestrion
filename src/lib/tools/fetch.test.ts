@@ -25,3 +25,14 @@ test('fetches web content and returns truncated text', async () => {
 	expect(result.truncated).toBe(true)
 	expect(result.contentType).toContain('text/plain')
 })
+
+test('denies fetches to non-allowlisted domains when a network policy is present', async () => {
+	const result = JSON.parse(
+		await executeFetchTool(JSON.stringify({ url: 'https://example.com/docs' }), {
+			networkAccessPolicy: { allowedDomains: ['fireworks.ai'] }
+		})
+	) as { error: string; ok: boolean }
+
+	expect(result.ok).toBe(false)
+	expect(result.error).toContain('denied by policy')
+})

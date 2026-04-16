@@ -1,19 +1,18 @@
 import { spawnSync } from 'node:child_process'
 import { statSync } from 'node:fs'
-import { resolve } from 'node:path'
 
 import {
+	formatToolPath,
 	getErrorMessage,
 	getRequestedPath,
 	isRecord,
-	normalizeRelativePath,
 	parseOptionalBoolean,
 	parseOptionalPositiveInteger,
 	readWorkspaceTextFile,
-	resolveWorkspacePath,
-	resolveWorkspaceRoot,
+	resolveToolDirectoryPath,
+	resolveToolFilePath,
 	splitLines,
-	walkWorkspaceFiles
+	walkToolFiles
 } from './common'
 import type { ToolExecutionContext } from './tool-types'
 
@@ -63,9 +62,10 @@ export function executeGrepTool(argumentsJson: string, options: ToolExecutionCon
 
 export function grepWorkspace(input: unknown, options: ToolExecutionContext = {}): GrepResult {
 	try {
-		const rootDirectory = resolveWorkspaceRoot(options.workspaceRoot)
 		const argumentsValue = parseGrepArguments(input)
-		const matches = grepWithRipgrep(rootDirectory, argumentsValue) ?? grepWithFallback(rootDirectory, argumentsValue)
+		const searchRoot = resolveToolDirectoryPath(options, argumentsValue.path)
+		const matches =
+			grepWithRipgrep(searchRoot, argumentsValue, options) ?? grepWithFallback(searchRoot, argumentsValue, options)
 		const maxResults = argumentsValue.maxResults ?? DEFAULT_MAX_RESULTS
 
 		return {
@@ -79,14 +79,18 @@ export function grepWorkspace(input: unknown, options: ToolExecutionContext = {}
 	}
 }
 
-function grepWithFallback(rootDirectory: string, argumentsValue: GrepArguments): GrepMatch[] {
+function grepWithFallback(
+	rootDirectory: string,
+	argumentsValue: GrepArguments,
+	options: ToolExecutionContext
+): GrepMatch[] {
 	const matcher = createLineMatcher(argumentsValue)
 	const matches: GrepMatch[] = []
-	const files = selectCandidateFiles(rootDirectory, argumentsValue.path)
+	const files = selectCandidateFiles(rootDirectory, argumentsValue.path, options)
 	const maxResults = argumentsValue.maxResults ?? DEFAULT_MAX_RESULTS
 
 	for (const relativePath of files) {
-		const absolutePath = resolveWorkspacePath(rootDirectory, relativePath)
+		const absolutePath = resolveToolFilePath(options, relativePath)
 		const lines = splitLines(readWorkspaceTextFile(absolutePath))
 
 		for (const [index, line] of lines.entries()) {
@@ -104,7 +108,11 @@ function grepWithFallback(rootDirectory: string, argumentsValue: GrepArguments):
 	return matches
 }
 
-function grepWithRipgrep(rootDirectory: string, argumentsValue: GrepArguments): GrepMatch[] | null {
+function grepWithRipgrep(
+	rootDirectory: string,
+	argumentsValue: GrepArguments,
+	options: ToolExecutionContext
+): GrepMatch[] | null {
 	const result = spawnSync('rg', buildRipgrepArgs(rootDirectory, argumentsValue), { encoding: 'utf8' })
 	if (result.error || (result.status !== 0 && result.status !== 1)) {
 		return null
@@ -133,7 +141,7 @@ function grepWithRipgrep(rootDirectory: string, argumentsValue: GrepArguments): 
 
 		matches.push({
 			line: parsedLine.data?.line_number ?? 0,
-			path: normalizeRipgrepPath(rootDirectory, matchPath),
+			path: normalizeRipgrepPath(options, rootDirectory, matchPath),
 			text: (parsedLine.data?.lines?.text ?? '').replace(/\r?\n$/, '')
 		})
 		if (matches.length >= maxResults) {
@@ -154,15 +162,13 @@ function buildRipgrepArgs(rootDirectory: string, argumentsValue: GrepArguments):
 	}
 
 	args.push(argumentsValue.query)
-	args.push(
-		argumentsValue.path?.trim() ? resolveWorkspacePath(rootDirectory, argumentsValue.path.trim()) : rootDirectory
-	)
+	args.push(rootDirectory)
 
 	return args
 }
 
-function normalizeRipgrepPath(rootDirectory: string, filePath: string): string {
-	return filePath.startsWith(rootDirectory) ? filePath.slice(rootDirectory.length + 1).replaceAll('\\', '/') : filePath
+function normalizeRipgrepPath(options: ToolExecutionContext, rootDirectory: string, filePath: string): string {
+	return filePath.startsWith(rootDirectory) ? formatToolPath(options, filePath) : filePath
 }
 
 function parseGrepArguments(input: unknown): GrepArguments {
@@ -215,19 +221,21 @@ function createLineMatcher(argumentsValue: GrepArguments): (line: string) => boo
 	return line => line.toLowerCase().includes(query)
 }
 
-function selectCandidateFiles(rootDirectory: string, path?: string): string[] {
+function selectCandidateFiles(
+	rootDirectory: string,
+	path: string | undefined,
+	options: ToolExecutionContext
+): string[] {
 	if (!path?.trim()) {
-		return walkWorkspaceFiles(rootDirectory)
+		return walkToolFiles(rootDirectory, options)
 	}
 
-	const absolutePath = resolveWorkspacePath(rootDirectory, path.trim())
+	const absolutePath = resolveToolDirectoryPath(options, path.trim())
 	const stats = statSync(absolutePath)
 
 	if (stats.isDirectory()) {
-		return walkWorkspaceFiles(absolutePath).map(filePath =>
-			normalizeRelativePath(rootDirectory, resolve(absolutePath, filePath))
-		)
+		return walkToolFiles(absolutePath, options)
 	}
 
-	return [normalizeRelativePath(rootDirectory, absolutePath)]
+	return [formatToolPath(options, absolutePath)]
 }

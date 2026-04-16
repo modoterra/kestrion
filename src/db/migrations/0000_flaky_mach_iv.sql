@@ -47,11 +47,7 @@ ON CONFLICT(`id`) DO UPDATE SET
 	`sort_order` = excluded.`sort_order`;--> statement-breakpoint
 INSERT INTO `provider_models` (`id`, `provider_id`, `label`, `description`, `model_identifier`, `sort_order`)
 VALUES
-	('forerunner-chat', 'fireworks', 'Conversational', 'Best default for everyday conversations and general tasks', 'accounts/fireworks/models/kimi-k2p5', 1),
-	('forerunner-thinking', 'fireworks', 'Thinking', 'Best for deeper reasoning, planning, and tricky multi-step work', 'accounts/fireworks/models/kimi-k2-thinking', 2),
-	('forerunner-vision', 'fireworks', 'Vision', 'Best for screenshots, images, and visual analysis', 'accounts/fireworks/models/qwen3-vl-30b-a3b-thinking', 3),
-	('forerunner-budget', 'fireworks', 'Budget', 'Lower-cost option for lightweight tasks and higher-volume usage', 'accounts/fireworks/models/deepseek-v3p2', 4),
-	('forerunner-premium-chat-alt', 'fireworks', 'Premium', 'Alternate flagship chat model for side-by-side evaluation', 'accounts/fireworks/models/qwen3p6-plus', 5)
+	('forerunner-chat', 'fireworks', 'Kimi K2.5', 'Curated Kimi profile with automatic Instant and Thinking mode switching', 'accounts/fireworks/models/kimi-k2p5', 1)
 ON CONFLICT(`id`) DO UPDATE SET
 	`provider_id` = excluded.`provider_id`,
 	`label` = excluded.`label`,

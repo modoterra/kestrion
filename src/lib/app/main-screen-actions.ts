@@ -1,7 +1,8 @@
 import type { TextareaRenderable } from '@opentui/core'
 import { startTransition, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 
-import { isDraftConversationId, type AgentService } from '../agent-service'
+import { isDraftConversationId } from '../services/agent-service'
+import type { AppService } from '../services/app-service'
 import type { ConversationSummary, ConversationThread } from '../types'
 import { configureShortcutFriendlyField } from '../ui/helpers'
 
@@ -11,14 +12,14 @@ type SetThread = Dispatch<SetStateAction<ConversationThread>>
 export function useComposerBindings({
 	busy,
 	composerRef,
-	missingProvider,
+	missingSetup,
 	setComposer,
 	setComposerEpoch,
 	viewStackIsActive
 }: {
 	busy: boolean
 	composerRef: MutableRefObject<TextareaRenderable | null>
-	missingProvider: boolean
+	missingSetup: boolean
 	setComposer: Dispatch<SetStateAction<string>>
 	setComposerEpoch: Dispatch<SetStateAction<number>>
 	viewStackIsActive: boolean
@@ -32,7 +33,7 @@ export function useComposerBindings({
 		composerRef.current = renderable
 		configureShortcutFriendlyField(renderable)
 	}
-	const focusComposer = (): void => focusComposerInput(busy, composerRef, missingProvider, viewStackIsActive)
+	const focusComposer = (): void => focusComposerInput(busy, composerRef, missingSetup, viewStackIsActive)
 	const resetComposer = (nextValue = ''): void => resetComposerState(setComposer, setComposerEpoch, nextValue)
 	const syncComposerFromEditor = (): void => {
 		setComposer(composerRef.current?.plainText ?? '')
@@ -54,26 +55,26 @@ export function useThreadActions({
 	activeThreadId: string
 	busy: boolean
 	resetComposer: (nextValue?: string) => void
-	service: AgentService
+	service: AppService
 	setActiveThread: SetThread
 	setConversations: SetConversations
 	setError: Dispatch<SetStateAction<string | null>>
 	setStatus: Dispatch<SetStateAction<string>>
 }): {
-	applyThread: (thread: ConversationThread, nextStatus: string) => void
+	applyThread: (thread: ConversationThread, conversations: ConversationSummary[], nextStatus: string) => void
 	createConversation: () => void
-	reloadConversation: () => void
+	reloadConversation: () => Promise<void>
 } {
-	const applyThread = (thread: ConversationThread, nextStatus: string): void => {
+	const applyThread = (thread: ConversationThread, conversations: ConversationSummary[], nextStatus: string): void => {
 		startTransition(() => {
 			setActiveThread(thread)
-			setConversations(service.listConversations())
+			setConversations(conversations)
 			setStatus(nextStatus)
 			setError(null)
 		})
 	}
 	const createConversation = (): void => createFreshConversation(busy, resetComposer, service, applyThread)
-	const reloadConversation = (): void =>
+	const reloadConversation = (): Promise<void> =>
 		reloadCurrentConversation(activeThreadId, busy, service, applyThread, setStatus)
 
 	return { applyThread, createConversation, reloadConversation }
@@ -90,15 +91,15 @@ export function useConversationDeletionActions({
 }: {
 	activeThreadId: string
 	resetComposer: (nextValue?: string) => void
-	service: AgentService
+	service: AppService
 	setActiveThread: SetThread
 	setConversations: SetConversations
 	setStatus: Dispatch<SetStateAction<string>>
 	sessionsCloseStatusRef: MutableRefObject<string>
-}): { deleteAllConversations: () => void; deleteConversation: (conversationId: string) => void } {
-	const deleteAllConversations = (): void =>
+}): { deleteAllConversations: () => Promise<void>; deleteConversation: (conversationId: string) => Promise<void> } {
+	const deleteAllConversations = (): Promise<void> =>
 		clearAllConversations(resetComposer, service, setActiveThread, setConversations, setStatus, sessionsCloseStatusRef)
-	const deleteConversation = (conversationId: string): void =>
+	const deleteConversation = (conversationId: string): Promise<void> =>
 		removeConversation(
 			activeThreadId,
 			conversationId,
@@ -116,10 +117,10 @@ export function useConversationDeletionActions({
 function focusComposerInput(
 	busy: boolean,
 	composerRef: MutableRefObject<TextareaRenderable | null>,
-	missingProvider: boolean,
+	missingSetup: boolean,
 	viewStackIsActive: boolean
 ): void {
-	if (viewStackIsActive || missingProvider || busy) {
+	if (viewStackIsActive || missingSetup || busy) {
 		return
 	}
 
@@ -145,8 +146,8 @@ function resetComposerState(
 function createFreshConversation(
 	busy: boolean,
 	resetComposer: (nextValue?: string) => void,
-	service: AgentService,
-	applyThread: (thread: ConversationThread, nextStatus: string) => void
+	service: AppService,
+	applyThread: (thread: ConversationThread, conversations: ConversationSummary[], nextStatus: string) => void
 ): void {
 	if (busy) {
 		return
@@ -154,16 +155,18 @@ function createFreshConversation(
 
 	const thread = service.createDraftConversation()
 	resetComposer()
-	applyThread(thread, 'Fresh session ready.')
+	void service.listConversations().then(conversations => {
+		return applyThread(thread, conversations, 'Fresh session ready.')
+	})
 }
 
-function reloadCurrentConversation(
+async function reloadCurrentConversation(
 	activeThreadId: string,
 	busy: boolean,
-	service: AgentService,
-	applyThread: (thread: ConversationThread, nextStatus: string) => void,
+	service: AppService,
+	applyThread: (thread: ConversationThread, conversations: ConversationSummary[], nextStatus: string) => void,
 	setStatus: Dispatch<SetStateAction<string>>
-): void {
+): Promise<void> {
 	if (busy) {
 		return
 	}
@@ -173,18 +176,22 @@ function reloadCurrentConversation(
 		return
 	}
 
-	applyThread(service.loadConversation(activeThreadId), 'Conversation reloaded.')
+	const [thread, conversations] = await Promise.all([
+		service.loadConversation(activeThreadId),
+		service.listConversations()
+	])
+	applyThread(thread, conversations, 'Conversation reloaded.')
 }
 
-function clearAllConversations(
+async function clearAllConversations(
 	resetComposer: (nextValue?: string) => void,
-	service: AgentService,
+	service: AppService,
 	setActiveThread: SetThread,
 	setConversations: SetConversations,
 	setStatus: Dispatch<SetStateAction<string>>,
 	sessionsCloseStatusRef: MutableRefObject<string>
-): void {
-	service.deleteAllConversations()
+): Promise<void> {
+	await service.deleteAllConversations()
 	resetComposer()
 	setConversations([])
 	setActiveThread(service.createDraftConversation())
@@ -192,18 +199,18 @@ function clearAllConversations(
 	setStatus('All conversations deleted.')
 }
 
-function removeConversation(
+async function removeConversation(
 	activeThreadId: string,
 	conversationId: string,
 	resetComposer: (nextValue?: string) => void,
-	service: AgentService,
+	service: AppService,
 	setActiveThread: SetThread,
 	setConversations: SetConversations,
 	setStatus: Dispatch<SetStateAction<string>>,
 	sessionsCloseStatusRef: MutableRefObject<string>
-): void {
-	service.deleteConversation(conversationId)
-	setConversations(service.listConversations())
+): Promise<void> {
+	await service.deleteConversation(conversationId)
+	setConversations(await service.listConversations())
 
 	if (activeThreadId === conversationId) {
 		resetComposer()

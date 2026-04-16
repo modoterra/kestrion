@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 
-import { openAppDatabaseConnection, type AppDatabase, type AppDatabaseConnection } from '../db'
+import { openAppDatabaseConnection, type AppDatabase, type AppDatabaseConnection } from '../../db'
 
 export function openAppDatabase(databaseFile: string): Database {
 	return openAppDatabaseConnection(databaseFile).client

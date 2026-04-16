@@ -1,25 +1,37 @@
 import type { TextareaRenderable } from '@opentui/core'
 import { startTransition, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 
-import type { AgentService } from '../agent-service'
 import { toErrorMessage } from '../errors'
+import type { AppService } from '../services/app-service'
 import type { ToolExecutionContext } from '../tools/tool-types'
-import type { ConversationSummary, ConversationThread, InferenceToolCall, MessageRecord } from '../types'
+import type {
+	ConversationSummary,
+	ConversationThread,
+	InferenceEvents,
+	InferenceToolCall,
+	MessageRecord,
+	ToolApprovalPrompt,
+	ToolApprovalResponse,
+	ToolCallMessageRecord,
+	WorkerTranscriptEntry
+} from '../types'
 
 type SetConversations = Dispatch<SetStateAction<ConversationSummary[]>>
 type SetThread = Dispatch<SetStateAction<ConversationThread>>
 
 type SendPromptActionArgs = {
 	activeThreadId: string
-	applyThread: (thread: ConversationThread, nextStatus: string) => void
+	applyThread: (thread: ConversationThread, conversations: ConversationSummary[], nextStatus: string) => void
 	busy: boolean
 	composer: string
 	composerRef: MutableRefObject<TextareaRenderable | null>
 	inFlightRequest: MutableRefObject<AbortController | null>
-	missingProvider: boolean
+	missingSetup: boolean
 	providerLabel: string
 	resetComposer: (nextValue?: string) => void
-	service: AgentService
+	service: AppService
+	mergeWorkerTranscriptEntriesForConversation: (conversationId: string, entries: WorkerTranscriptEntry[]) => void
+	requestApproval: (prompt: ToolApprovalPrompt) => Promise<ToolApprovalResponse>
 	setActiveThread: SetThread
 	setActiveToolCalls: Dispatch<SetStateAction<InferenceToolCall[] | null>>
 	setBusy: Dispatch<SetStateAction<boolean>>
@@ -27,6 +39,7 @@ type SendPromptActionArgs = {
 	setError: Dispatch<SetStateAction<string | null>>
 	setPendingAssistantMessage: Dispatch<SetStateAction<MessageRecord | null>>
 	setStatus: Dispatch<SetStateAction<string>>
+	setToolCallMessages: Dispatch<SetStateAction<ToolCallMessageRecord[]>>
 	toolContext: ToolExecutionContext
 	viewStackIsActive: boolean
 }
@@ -44,9 +57,9 @@ async function sendPromptRequest(args: SendPromptActionArgs, submittedValue: str
 	}
 
 	const controller = startPromptRequest(args)
-	const withUserMessage = createUserThread(args, prompt)
+	const withUserMessage = await createUserThread(args, prompt)
 	const conversationId = withUserMessage.conversation.id
-	args.applyThread(withUserMessage, `${args.providerLabel} is thinking...`)
+	args.applyThread(withUserMessage, await args.service.listConversations(), `${args.providerLabel} is thinking...`)
 
 	try {
 		const withAssistantMessage = await args.service.generateAssistantReply(
@@ -57,9 +70,9 @@ async function sendPromptRequest(args: SendPromptActionArgs, submittedValue: str
 		)
 		args.setActiveToolCalls(null)
 		args.setPendingAssistantMessage(null)
-		args.applyThread(withAssistantMessage, `${args.providerLabel} replied.`)
+		args.applyThread(withAssistantMessage, await args.service.listConversations(), `${args.providerLabel} replied.`)
 	} catch (cause) {
-		handlePromptFailure(
+		await handlePromptFailure(
 			cause,
 			conversationId,
 			args.service,
@@ -87,18 +100,11 @@ function startPromptRequest(args: SendPromptActionArgs): AbortController {
 	return controller
 }
 
-function createUserThread(args: SendPromptActionArgs, prompt: string): ConversationThread {
+function createUserThread(args: SendPromptActionArgs, prompt: string): Promise<ConversationThread> {
 	return args.service.addUserMessage(args.activeThreadId, prompt)
 }
 
-function createInferenceEvents(
-	args: SendPromptActionArgs,
-	thread: ConversationThread
-): {
-	onTextDelta: (delta: string) => void
-	onToolCallsFinish: () => void
-	onToolCallsStart: (toolCalls: InferenceToolCall[]) => void
-} {
+function createInferenceEvents(args: SendPromptActionArgs, thread: ConversationThread): InferenceEvents {
 	return {
 		onTextDelta: delta => {
 			appendPendingAssistantDelta(delta, args.setPendingAssistantMessage, thread)
@@ -106,17 +112,23 @@ function createInferenceEvents(
 		},
 		onToolCallsFinish: () => {
 			args.setActiveToolCalls(null)
+			args.setToolCallMessages(current => markLatestToolCallBatchCompleted(current))
 			args.setStatus(`${args.providerLabel} is thinking...`)
 		},
 		onToolCallsStart: toolCalls => {
 			args.setActiveToolCalls(toolCalls)
+			args.setToolCallMessages(current => current.concat(createToolCallMessage(thread.conversation.id, toolCalls)))
 			args.setStatus(buildToolCallStatus(args.providerLabel, toolCalls))
+		},
+		onToolApprovalPrompt: prompt => args.requestApproval(prompt),
+		onWorkerTranscriptEntry: entry => {
+			args.mergeWorkerTranscriptEntriesForConversation(thread.conversation.id, [entry])
 		}
 	}
 }
 
 function resolveSubmittedPrompt(args: SendPromptActionArgs, submittedValue: string | undefined): string | null {
-	if (args.busy || args.missingProvider || args.viewStackIsActive) {
+	if (args.busy || args.missingSetup || args.viewStackIsActive) {
 		return null
 	}
 
@@ -138,22 +150,23 @@ function getFirstPromptValue(...values: unknown[]): string | null {
 	return null
 }
 
-function handlePromptFailure(
+async function handlePromptFailure(
 	cause: unknown,
 	conversationId: string,
-	service: AgentService,
+	service: AppService,
 	setActiveThread: SetThread,
 	setActiveToolCalls: Dispatch<SetStateAction<InferenceToolCall[] | null>>,
 	setConversations: SetConversations,
 	setError: Dispatch<SetStateAction<string | null>>,
 	setPendingAssistantMessage: Dispatch<SetStateAction<MessageRecord | null>>,
 	setStatus: Dispatch<SetStateAction<string>>
-): void {
-	const latestThread = service.loadConversation(conversationId)
+): Promise<void> {
+	const latestThread = await service.loadConversation(conversationId)
+	const conversations = await service.listConversations()
 	startTransition(() => {
 		setActiveThread(latestThread)
 		setActiveToolCalls(null)
-		setConversations(service.listConversations())
+		setConversations(conversations)
 		setPendingAssistantMessage(null)
 		setStatus('Request failed.')
 		setError(toErrorMessage(cause))
@@ -190,4 +203,31 @@ function buildToolCallStatus(providerLabel: string, toolCalls: InferenceToolCall
 		toolNames.length <= 2 ? toolNames.join(', ') : `${toolNames.slice(0, 2).join(', ')} +${toolNames.length - 2}`
 
 	return toolSummary ? `${providerLabel} is using ${toolSummary}...` : `${providerLabel} is using tools...`
+}
+
+function createToolCallMessage(conversationId: string, toolCalls: InferenceToolCall[]): ToolCallMessageRecord {
+	return {
+		conversationId,
+		createdAt: new Date().toISOString(),
+		id: `tool:${conversationId}:${Date.now()}:${buildToolCallBatchKey(toolCalls)}`,
+		status: 'running',
+		toolCalls
+	}
+}
+
+function markLatestToolCallBatchCompleted(messages: ToolCallMessageRecord[]): ToolCallMessageRecord[] {
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index]
+		if (message?.status !== 'running') {
+			continue
+		}
+
+		return messages.map((entry, entryIndex) => (entryIndex === index ? { ...entry, status: 'completed' } : entry))
+	}
+
+	return messages
+}
+
+function buildToolCallBatchKey(toolCalls: InferenceToolCall[]): string {
+	return toolCalls.map(toolCall => toolCall.id || `${toolCall.name}:${toolCall.argumentsJson}`).join('|')
 }

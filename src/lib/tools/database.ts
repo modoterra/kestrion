@@ -1,5 +1,5 @@
-import type { AppDatabase } from '../app-database'
-import { openAppDatabaseConnectionWithDrizzle } from '../app-database'
+import type { AppDatabase } from '../storage/app-database'
+import { openAppDatabaseConnectionWithDrizzle } from '../storage/app-database'
 import { getAppPaths } from './common'
 import type { ToolExecutionContext } from './tool-types'
 

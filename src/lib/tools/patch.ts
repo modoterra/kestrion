@@ -1,13 +1,12 @@
 import { writeFileSync } from 'node:fs'
 
 import {
+	formatToolPath,
 	getErrorMessage,
 	getRequestedPath,
 	isRecord,
-	normalizeRelativePath,
 	readWorkspaceTextFile,
-	resolveWorkspaceFilePath,
-	resolveWorkspaceRoot,
+	resolveToolFilePath,
 	splitLines
 } from './common'
 import type { ToolExecutionContext } from './tool-types'
@@ -67,9 +66,8 @@ export function executePatchTool(argumentsJson: string, options: ToolExecutionCo
 
 export function patchWorkspaceFile(input: unknown, options: ToolExecutionContext = {}): PatchResult {
 	try {
-		const rootDirectory = resolveWorkspaceRoot(options.workspaceRoot)
 		const argumentsValue = parsePatchArguments(input)
-		const filePath = resolveWorkspaceFilePath(rootDirectory, argumentsValue.path.trim())
+		const filePath = resolveToolFilePath(options, argumentsValue.path.trim(), { write: true })
 		const originalContent = readWorkspaceTextFile(filePath)
 		const hadTrailingNewline = originalContent.endsWith('\n')
 		const lines = splitLines(originalContent)
@@ -84,12 +82,18 @@ export function patchWorkspaceFile(input: unknown, options: ToolExecutionContext
 
 		const nextContent = lines.join('\n')
 		writeFileSync(filePath, hadTrailingNewline && nextContent ? `${nextContent}\n` : nextContent, 'utf8')
+		options.onMutation?.({
+			operation: 'write',
+			path: filePath,
+			sizeBytes: Buffer.byteLength(nextContent, 'utf8'),
+			toolName: PATCH_TOOL_NAME
+		})
 
 		return {
 			lineCount: lines.length,
 			ok: true,
 			patchesApplied: argumentsValue.patches.length,
-			path: normalizeRelativePath(rootDirectory, filePath)
+			path: formatToolPath(options, filePath)
 		}
 	} catch (error) {
 		return { error: getErrorMessage(error), ok: false, path: getRequestedPath(input) }

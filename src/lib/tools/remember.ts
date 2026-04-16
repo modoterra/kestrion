@@ -5,7 +5,7 @@ import { desc, eq } from 'drizzle-orm'
 import { toolMemoryEntries, toolScratchMemory } from '../../db/schema'
 import { getErrorMessage, isRecord, parseOptionalPositiveInteger } from './common'
 import { withToolDatabase } from './database'
-import type { ToolExecutionContext } from './tool-types'
+import type { ToolExecutionContext, ToolMemoryKind } from './tool-types'
 import { parseOptionalStringField } from './value-parsers'
 
 const DEFAULT_MEMORY_LIMIT = 10
@@ -41,7 +41,6 @@ export const REMEMBER_TOOL_DEFINITION = {
 } as const
 
 type MemoryAction = 'list' | 'read' | 'write'
-type MemoryKind = 'episodic' | 'long-term' | 'scratch'
 type ScratchMode = 'append' | 'replace'
 type MemoryEntry = { content: string; createdAt: string; id: string; tags: string[]; title: string }
 type MemoryDatabaseRow = { content: string; createdAt: string; id: string; tagsJson: string; title: string }
@@ -49,7 +48,7 @@ type RememberArguments = {
 	action: MemoryAction
 	content?: string
 	limit?: number
-	memory: MemoryKind
+	memory: ToolMemoryKind
 	mode?: ScratchMode
 	query?: string
 	tags?: string[]
@@ -57,9 +56,9 @@ type RememberArguments = {
 }
 type RememberErrorResult = { error: string; ok: false }
 type RememberSuccessResult =
-	| { content: string; memory: MemoryKind; ok: true }
-	| { entries: MemoryEntry[]; memory: MemoryKind; ok: true; total: number; truncated: boolean }
-	| { entry: MemoryEntry; memory: MemoryKind; ok: true }
+	| { content: string; memory: ToolMemoryKind; ok: true }
+	| { entries: MemoryEntry[]; memory: ToolMemoryKind; ok: true; total: number; truncated: boolean }
+	| { entry: MemoryEntry; memory: ToolMemoryKind; ok: true }
 type DatabaseLike = Parameters<Parameters<typeof withToolDatabase>[1]>[0]
 
 export type RememberResult = RememberErrorResult | RememberSuccessResult
@@ -79,6 +78,7 @@ export function executeRememberTool(argumentsJson: string, options: ToolExecutio
 export function runRememberTool(input: unknown, options: ToolExecutionContext = {}): RememberResult {
 	try {
 		const argumentsValue = parseRememberArguments(input)
+		assertMemoryKindAllowed(argumentsValue.memory, options)
 
 		return withToolDatabase(options, database => {
 			if (argumentsValue.memory === 'scratch') {
@@ -89,6 +89,13 @@ export function runRememberTool(input: unknown, options: ToolExecutionContext = 
 		})
 	} catch (error) {
 		return { error: getErrorMessage(error), ok: false }
+	}
+}
+
+function assertMemoryKindAllowed(memoryKind: ToolMemoryKind, options: ToolExecutionContext): void {
+	const allowedMemoryKinds = options.allowedMemoryKinds
+	if (allowedMemoryKinds && !allowedMemoryKinds.includes(memoryKind)) {
+		throw new Error(`Memory kind "${memoryKind}" is denied by policy for tool "remember".`)
 	}
 }
 
@@ -204,7 +211,7 @@ function buildScratchContent(currentContent: string, nextChunk: string | undefin
 
 function writeStructuredMemory(
 	database: DatabaseLike,
-	memory: Extract<MemoryKind, 'episodic' | 'long-term'>,
+	memory: Extract<ToolMemoryKind, 'episodic' | 'long-term'>,
 	argumentsValue: RememberArguments
 ): RememberSuccessResult {
 	const content = argumentsValue.content?.trim()
@@ -236,7 +243,7 @@ function writeStructuredMemory(
 
 function listStructuredMemory(
 	database: DatabaseLike,
-	memory: Extract<MemoryKind, 'episodic' | 'long-term'>,
+	memory: Extract<ToolMemoryKind, 'episodic' | 'long-term'>,
 	argumentsValue: RememberArguments
 ): RememberSuccessResult {
 	const filteredEntries = readStructuredMemoryEntries(database, memory, argumentsValue.query)
@@ -253,7 +260,7 @@ function listStructuredMemory(
 
 function readStructuredMemoryEntries(
 	database: DatabaseLike,
-	memory: Extract<MemoryKind, 'episodic' | 'long-term'>,
+	memory: Extract<ToolMemoryKind, 'episodic' | 'long-term'>,
 	query: string | undefined
 ): MemoryEntry[] {
 	const normalizedQuery = query?.trim().toLowerCase()

@@ -23,11 +23,19 @@ export function resolveAnswer(
 	draft: string,
 	selectedOption: SelectOption | undefined,
 	questionOption: ToolQuestionOption | undefined,
-	allowFreeform: boolean
+	allowFreeform: boolean,
+	freeformOptionValue?: string
 ): ToolQuestionAnswer | null {
 	const typedAnswer = draft.trim()
-	if (allowFreeform && typedAnswer) {
+	const selectedValue = typeof questionOption?.value === 'string' ? questionOption.value : undefined
+	const freeformEnabledForSelection = !freeformOptionValue || selectedValue === freeformOptionValue
+
+	if (allowFreeform && typedAnswer && freeformEnabledForSelection) {
 		return { answer: typedAnswer, source: 'freeform' }
+	}
+
+	if (allowFreeform && freeformOptionValue && selectedValue === freeformOptionValue) {
+		return null
 	}
 
 	if (!selectedOption || !questionOption) {

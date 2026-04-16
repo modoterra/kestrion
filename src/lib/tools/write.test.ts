@@ -40,6 +40,20 @@ test('overwrites an existing workspace file', () => {
 	expect(readFileSync(join(workspaceRoot, 'notes.txt'), 'utf8')).toBe('beta\n')
 })
 
+test('rejects writes outside the allowed sandbox root', () => {
+	const agentRoot = createTemporaryDirectory('kestrion-write-agent-')
+	const configRoot = createTemporaryDirectory('kestrion-write-config-')
+
+	const result = JSON.parse(
+		executeWriteTool(JSON.stringify({ content: 'denied\n', path: join(configRoot, 'blocked.txt') }), {
+			fileAccessPolicy: { defaultReadRoot: agentRoot, readRoots: [agentRoot, configRoot], writeRoots: [agentRoot] }
+		})
+	) as { error: string; ok: boolean }
+
+	expect(result.ok).toBe(false)
+	expect(result.error).toContain('outside the allowed roots')
+})
+
 function createTemporaryDirectory(prefix: string): string {
 	const path = mkdtempSync(join(tmpdir(), prefix))
 	cleanupPaths.push(path)

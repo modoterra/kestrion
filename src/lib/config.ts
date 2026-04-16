@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 import type { AppPaths } from './paths'
 
@@ -54,9 +55,13 @@ export type FireworksProviderConfig = {
 export type ResolvedAppConfig = {
 	configFile: string
 	defaultProvider: string
+	matrixPromptError: string | null
+	matrixPromptPath: string
 	providers: { fireworks: FireworksProviderConfig }
 	systemPrompt: string
 }
+
+type ResolvedMatrixPrompt = { error: string | null; path: string; systemPrompt: string }
 
 const DEFAULT_FIREWORKS_CONFIG: WritableFireworksProviderConfig = {
 	apiKey: '',
@@ -76,8 +81,7 @@ const DEFAULT_CONFIG: {
 } = {
 	defaultProvider: 'fireworks',
 	providers: { fireworks: DEFAULT_FIREWORKS_CONFIG },
-	systemPrompt:
-		'You are Kestrion, a terminal-first AI agent. Keep answers concise, useful, and easy to scan in a terminal.'
+	systemPrompt: 'You are Kestrion, a terminal-first AI agent.'
 }
 
 export function loadAppConfig(paths: AppPaths): ResolvedAppConfig {
@@ -103,33 +107,22 @@ export function getDefaultAppConfig(): WritableAppConfig {
 }
 
 function resolveAppConfig(configFile: string, rawConfig: WritableAppConfig): ResolvedAppConfig {
-	const fileConfig = rawConfig.providers?.fireworks ?? {}
-	const defaultProvider =
-		rawConfig.defaultProvider === 'fireworks' ? rawConfig.defaultProvider : DEFAULT_CONFIG.defaultProvider
-	const apiKeyEnv = fileConfig.apiKeyEnv ?? DEFAULT_FIREWORKS_CONFIG.apiKeyEnv
-	const envApiKey = process.env[apiKeyEnv]?.trim() ?? ''
-	const fileApiKey = fileConfig.apiKey?.trim() ?? ''
-	const apiKey = envApiKey || fileApiKey
-	const apiKeySource: ApiKeySource = envApiKey ? 'env' : fileApiKey ? 'config' : 'missing'
+	return resolveAppConfigFromWritableConfig(configFile, rawConfig)
+}
 
+export function resolveRuntimeAppConfig(config: ResolvedAppConfig): ResolvedAppConfig {
 	return {
-		configFile,
-		defaultProvider,
-		providers: {
-			fireworks: {
-				apiKey,
-				apiKeyEnv,
-				apiKeySource,
-				baseUrl: fileConfig.baseUrl ?? DEFAULT_FIREWORKS_CONFIG.baseUrl,
-				maxTokens: fileConfig.maxTokens ?? DEFAULT_FIREWORKS_CONFIG.maxTokens,
-				model: fileConfig.model ?? DEFAULT_FIREWORKS_CONFIG.model,
-				promptTruncateLength: fileConfig.promptTruncateLength ?? DEFAULT_FIREWORKS_CONFIG.promptTruncateLength,
-				providerMode: inferProviderMode(fileConfig),
-				temperature: fileConfig.temperature ?? DEFAULT_FIREWORKS_CONFIG.temperature
-			}
-		},
-		systemPrompt: rawConfig.systemPrompt ?? DEFAULT_CONFIG.systemPrompt
+		...config,
+		providers: { ...config.providers, fireworks: resolveFireworksConfigWithEnv(config.providers.fireworks) }
 	}
+}
+
+export function assertMatrixPromptConfigured(config: ResolvedAppConfig): void {
+	if (!config.matrixPromptError) {
+		return
+	}
+
+	throw new Error(config.matrixPromptError)
 }
 
 function readOrCreateConfig(paths: AppPaths): WritableAppConfig {
@@ -183,4 +176,66 @@ function inferProviderMode(
 	}
 
 	return null
+}
+
+function resolveAppConfigFromWritableConfig(configFile: string, rawConfig: WritableAppConfig): ResolvedAppConfig {
+	const fileConfig = rawConfig.providers?.fireworks ?? {}
+	const defaultProvider =
+		rawConfig.defaultProvider === 'fireworks' ? rawConfig.defaultProvider : DEFAULT_CONFIG.defaultProvider
+	const resolvedMatrixPrompt = resolveMatrixPrompt(configFile, rawConfig.systemPrompt ?? DEFAULT_CONFIG.systemPrompt)
+
+	return {
+		configFile,
+		defaultProvider,
+		matrixPromptError: resolvedMatrixPrompt.error,
+		matrixPromptPath: resolvedMatrixPrompt.path,
+		providers: {
+			fireworks: resolveFireworksConfigWithEnv({
+				apiKey: fileConfig.apiKey?.trim() ?? '',
+				apiKeyEnv: fileConfig.apiKeyEnv ?? DEFAULT_FIREWORKS_CONFIG.apiKeyEnv,
+				apiKeySource: 'missing',
+				baseUrl: fileConfig.baseUrl ?? DEFAULT_FIREWORKS_CONFIG.baseUrl,
+				maxTokens: fileConfig.maxTokens ?? DEFAULT_FIREWORKS_CONFIG.maxTokens,
+				model: fileConfig.model ?? DEFAULT_FIREWORKS_CONFIG.model,
+				promptTruncateLength: fileConfig.promptTruncateLength ?? DEFAULT_FIREWORKS_CONFIG.promptTruncateLength,
+				providerMode: inferProviderMode(fileConfig),
+				temperature: fileConfig.temperature ?? DEFAULT_FIREWORKS_CONFIG.temperature
+			})
+		},
+		systemPrompt: resolvedMatrixPrompt.systemPrompt
+	}
+}
+
+function resolveFireworksConfigWithEnv(config: FireworksProviderConfig): FireworksProviderConfig {
+	const apiKeyEnv = config.apiKeyEnv || DEFAULT_FIREWORKS_CONFIG.apiKeyEnv
+	const envApiKey = process.env[apiKeyEnv]?.trim() ?? ''
+	const fileApiKey = config.apiKey?.trim() ?? ''
+	const apiKey = envApiKey || fileApiKey
+	const apiKeySource: ApiKeySource = envApiKey ? 'env' : fileApiKey ? 'config' : 'missing'
+
+	return { ...config, apiKey, apiKeyEnv, apiKeySource }
+}
+
+function resolveMatrixPrompt(configFile: string, baseSystemPrompt: string): ResolvedMatrixPrompt {
+	const matrixPromptPath = join(dirname(configFile), 'MATRIX.md')
+
+	try {
+		const matrixPrompt = readFileSync(matrixPromptPath, 'utf8')
+		return {
+			error: null,
+			path: matrixPromptPath,
+			systemPrompt: `${baseSystemPrompt.trim()}\n\nFollow the instructions below from MATRIX.md.\n\n${matrixPrompt}`
+		}
+	} catch (error) {
+		return {
+			error: buildMatrixPromptError(matrixPromptPath, error),
+			path: matrixPromptPath,
+			systemPrompt: baseSystemPrompt
+		}
+	}
+}
+
+function buildMatrixPromptError(matrixPromptPath: string, error: unknown): string {
+	const detail = error instanceof Error && error.message ? ` (${error.message})` : ''
+	return `MATRIX.md is required before sending a reply. Create ${matrixPromptPath}.${detail}`
 }

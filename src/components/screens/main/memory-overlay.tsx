@@ -1,7 +1,6 @@
 import { type Dispatch, type ReactNode, type SetStateAction } from 'react'
 
 import type { AppProps } from '../../../lib/app/types'
-import { loadMemorySnapshot } from '../../../lib/memory-store'
 import { MemoryScreen } from '../memory/screen'
 
 type ViewStackEntry = { element: ReactNode; onPop?: () => void }
@@ -14,12 +13,12 @@ type ViewStackControls = {
 
 export function useMemoryOverlayAction({
 	busy,
-	paths,
+	service,
 	setStatus,
 	viewStack
 }: {
 	busy: boolean
-	paths: AppProps['paths']
+	service: AppProps['service']
 	setStatus: Dispatch<SetStateAction<string>>
 	viewStack: ViewStackControls
 }): { openMemoryView: () => void } {
@@ -28,10 +27,18 @@ export function useMemoryOverlayAction({
 			return
 		}
 
-		const snapshot = loadMemorySnapshot(paths)
-		viewStack.push({ element: <MemoryScreen snapshot={snapshot} />, onPop: () => setStatus('Composer ready.') })
-		setStatus('Browsing memories.')
+		void openMemoryScreen(service, setStatus, viewStack)
 	}
 
 	return { openMemoryView }
+}
+
+async function openMemoryScreen(
+	service: AppProps['service'],
+	setStatus: Dispatch<SetStateAction<string>>,
+	viewStack: ViewStackControls
+): Promise<void> {
+	const snapshot = await service.loadMemorySnapshot()
+	viewStack.push({ element: <MemoryScreen snapshot={snapshot} />, onPop: () => setStatus('Composer ready.') })
+	setStatus('Browsing memories.')
 }

@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from 'react'
 
-import { getMemoryLabel, type MemoryKind, type MemorySnapshot } from '../../../lib/memory-store'
 import { useViewStack } from '../../../lib/navigation/view-stack'
+import { getMemoryLabel, type MemoryKind, type MemorySnapshot } from '../../../lib/storage/memory-store'
 import { truncate } from '../../../lib/ui/helpers'
 import { ViewSelect, type ViewSelectOption } from '../../ui/navigation/view-select'
 import { MemoryDetailScreen } from './detail-screen'

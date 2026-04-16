@@ -1,3 +1,5 @@
+/* eslint-disable import/max-dependencies */
+
 import {
 	useComposerBindings,
 	useConversationDeletionActions,
@@ -8,22 +10,26 @@ import { useSendPromptAction } from '../../../lib/app/main-screen-prompt'
 import { useMainScreenState, type MainScreenState } from '../../../lib/app/main-screen-state'
 import type { AppProps } from '../../../lib/app/types'
 import { useViewStack } from '../../../lib/navigation/view-stack'
-import type { ToolExecutionContext } from '../../../lib/tools/tool-types'
+import type { ToolApprovalPrompt, ToolApprovalResponse } from '../../../lib/types'
 import {
+	useMatrixOverlayActions,
 	useProviderOverlayActions,
 	useSessionsOverlayAction,
 	useShortcutsOverlayAction,
 	useToolsOverlayAction
 } from './overlays'
 import { useCommandPaletteOptions, useCommandPaletteOverlayAction, useMemoryOverlayAction } from './palette'
-import { useToolExecutionContext } from './tool-execution-context'
+import { requestToolApproval, useToolExecutionContext } from './tool-execution-context'
+import { useTranscriptOverlayAction } from './transcript-overlay'
 
 type MainScreenOverlayActions = {
 	openCommandPalette: () => void
 	openMemoryView: () => void
+	openMatrixSetup: () => void
 	openProviderConfig: () => void
 	openSessionsView: () => void
 	openShortcutsView: () => void
+	openTranscriptView: () => void
 	openToolsView: () => void
 }
 
@@ -44,7 +50,7 @@ export function useMainScreenController(props: AppProps): MainScreenController {
 	const viewStack = useViewStack()
 	const state = useMainScreenState(props)
 	const toolContext = useToolExecutionContext(props.paths, state.setStatus, viewStack)
-	const coreActions = useMainScreenCoreActions(props, state, viewStack.isActive, toolContext)
+	const coreActions = useMainScreenCoreActions(props, state, viewStack, viewStack.isActive, toolContext)
 	const overlayActions = useMainScreenOverlays(props, state, coreActions, viewStack)
 
 	useMainScreenEffects({
@@ -54,9 +60,10 @@ export function useMainScreenController(props: AppProps): MainScreenController {
 		composerEpoch: state.composerEpoch,
 		composerRef: state.composerRef,
 		deferredMessageCount: state.deferredMessages.length,
-		missingProvider: state.missingProvider,
+		missingSetup: state.missingSetup,
 		pendingAssistantMessage: state.pendingAssistantMessage,
 		setSpinnerFrameIndex: state.setSpinnerFrameIndex,
+		toolCallMessages: state.toolCallMessages,
 		transcriptRef: state.transcriptRef,
 		viewStackIsActive: viewStack.isActive
 	})
@@ -70,8 +77,66 @@ function useMainScreenOverlays(
 	coreActions: MainScreenCoreActions,
 	viewStack: ReturnType<typeof useViewStack>
 ): MainScreenOverlayActions {
-	const { openProviderConfig } = useProviderOverlayActions({
+	const { openMatrixSetup } = useMatrixOverlay(props, state, viewStack)
+	const { openProviderConfig } = useProviderOverlay(props, state, viewStack)
+	const { openSessionsView } = useSessionsOverlay(props, state, coreActions, viewStack)
+	const { openMemoryView, openShortcutsView, openToolsView, openTranscriptView } = useBrowserOverlayActions(
+		props.service,
+		state.busy,
+		state.setStatus,
+		viewStack
+	)
+	const { openCommandPalette } = usePaletteOverlayActions(
+		state,
+		coreActions,
+		openMemoryView,
+		openMatrixSetup,
+		openProviderConfig,
+		openSessionsView,
+		openShortcutsView,
+		openTranscriptView,
+		openToolsView,
+		viewStack
+	)
+
+	return {
+		openCommandPalette,
+		openMemoryView,
+		openMatrixSetup,
+		openProviderConfig,
+		openSessionsView,
+		openShortcutsView,
+		openTranscriptView,
+		openToolsView
+	}
+}
+
+function useMatrixOverlay(
+	props: AppProps,
+	state: MainScreenState,
+	viewStack: ReturnType<typeof useViewStack>
+): ReturnType<typeof useMatrixOverlayActions> {
+	return useMatrixOverlayActions({
 		busy: state.busy,
+		matrixCloseStatusRef: state.matrixCloseStatusRef,
+		paths: props.paths,
+		resolvedConfig: state.resolvedConfig,
+		service: props.service,
+		setError: state.setError,
+		setResolvedConfig: state.setResolvedConfig,
+		setStatus: state.setStatus,
+		viewStack
+	})
+}
+
+function useProviderOverlay(
+	props: AppProps,
+	state: MainScreenState,
+	viewStack: ReturnType<typeof useViewStack>
+): ReturnType<typeof useProviderOverlayActions> {
+	return useProviderOverlayActions({
+		busy: state.busy,
+		fireworksModels: props.fireworksModels,
 		paths: props.paths,
 		providerCloseStatusRef: state.providerCloseStatusRef,
 		service: props.service,
@@ -82,7 +147,15 @@ function useMainScreenOverlays(
 		viewStack,
 		writableConfig: state.writableConfig
 	})
-	const { openSessionsView } = useSessionsOverlayAction({
+}
+
+function useSessionsOverlay(
+	props: AppProps,
+	state: MainScreenState,
+	coreActions: MainScreenCoreActions,
+	viewStack: ReturnType<typeof useViewStack>
+): ReturnType<typeof useSessionsOverlayAction> {
+	return useSessionsOverlayAction({
 		activeThreadId: state.activeThread.conversation.id,
 		applyThread: coreActions.applyThread,
 		busy: state.busy,
@@ -95,51 +168,35 @@ function useMainScreenOverlays(
 		setStatus: state.setStatus,
 		viewStack
 	})
-	const { openMemoryView, openShortcutsView, openToolsView } = useBrowserOverlayActions(
-		props.paths,
-		state.busy,
-		state.setStatus,
-		viewStack
-	)
-	const { openCommandPalette } = usePaletteOverlayActions(
-		state,
-		coreActions,
-		openMemoryView,
-		openProviderConfig,
-		openSessionsView,
-		openShortcutsView,
-		openToolsView,
-		viewStack
-	)
-
-	return { openCommandPalette, openMemoryView, openProviderConfig, openSessionsView, openShortcutsView, openToolsView }
 }
 
 function useBrowserOverlayActions(
-	paths: AppProps['paths'],
+	service: AppProps['service'],
 	busy: boolean,
 	setStatus: MainScreenState['setStatus'],
 	viewStack: ReturnType<typeof useViewStack>
-): Pick<MainScreenOverlayActions, 'openMemoryView' | 'openShortcutsView' | 'openToolsView'> {
+): Pick<MainScreenOverlayActions, 'openMemoryView' | 'openShortcutsView' | 'openToolsView' | 'openTranscriptView'> {
 	const { openShortcutsView } = useShortcutsOverlayAction({ busy, setStatus, viewStack })
-	const { openMemoryView } = useMemoryOverlayAction({ busy, paths, setStatus, viewStack })
+	const { openMemoryView } = useMemoryOverlayAction({ busy, service, setStatus, viewStack })
 	const { openToolsView } = useToolsOverlayAction({ busy, setStatus, viewStack })
+	const { openTranscriptView } = useTranscriptOverlayAction({ busy, setStatus, viewStack })
 
-	return { openMemoryView, openShortcutsView, openToolsView }
+	return { openMemoryView, openShortcutsView, openToolsView, openTranscriptView }
 }
 
 function useMainScreenCoreActions(
 	props: AppProps,
 	state: MainScreenState,
+	viewStack: ReturnType<typeof useViewStack>,
 	viewStackIsActive: boolean,
-	toolContext: ToolExecutionContext
+	toolContext: ReturnType<typeof useToolExecutionContext>
 ): ReturnType<typeof useComposerBindings> &
 	ReturnType<typeof useThreadActions> &
 	ReturnType<typeof useConversationDeletionActions> & { sendPrompt: ReturnType<typeof useSendPromptAction> } {
 	const composerBindings = useComposerBindings({
 		busy: state.busy,
 		composerRef: state.composerRef,
-		missingProvider: state.missingProvider,
+		missingSetup: state.missingSetup,
 		setComposer: state.setComposer,
 		setComposerEpoch: state.setComposerEpoch,
 		viewStackIsActive
@@ -169,7 +226,8 @@ function useMainScreenCoreActions(
 		threadActions.applyThread,
 		composerBindings.resetComposer,
 		viewStackIsActive,
-		toolContext
+		toolContext,
+		prompt => requestToolApproval(prompt, state.setStatus, viewStack)
 	)
 
 	return { ...composerBindings, ...threadActions, ...deletionActions, sendPrompt }
@@ -179,18 +237,22 @@ function usePaletteOverlayActions(
 	state: MainScreenState,
 	coreActions: MainScreenCoreActions,
 	openMemoryView: () => void,
+	openMatrixSetup: () => void,
 	openProviderConfig: () => void,
 	openSessionsView: () => void,
 	openShortcutsView: () => void,
+	openTranscriptView: () => void,
 	openToolsView: () => void,
 	viewStack: ReturnType<typeof useViewStack>
 ): Pick<MainScreenOverlayActions, 'openCommandPalette'> {
 	const commandPaletteOptions = useCommandPaletteOptions({
 		createConversation: coreActions.createConversation,
 		openMemoryView,
+		openMatrixSetup,
 		openProviderConfig,
 		openSessionsView,
 		openShortcutsView,
+		openTranscriptView,
 		openToolsView,
 		reloadConversation: coreActions.reloadConversation
 	})
@@ -209,7 +271,8 @@ function useMainPromptAction(
 	applyThread: ReturnType<typeof useThreadActions>['applyThread'],
 	resetComposer: ReturnType<typeof useComposerBindings>['resetComposer'],
 	viewStackIsActive: boolean,
-	toolContext: ToolExecutionContext
+	toolContext: ReturnType<typeof useToolExecutionContext>,
+	requestApproval: (prompt: ToolApprovalPrompt) => Promise<ToolApprovalResponse>
 ): ReturnType<typeof useSendPromptAction> {
 	return useSendPromptAction({
 		activeThreadId: state.activeThread.conversation.id,
@@ -218,7 +281,7 @@ function useMainPromptAction(
 		composer: state.composer,
 		composerRef: state.composerRef,
 		inFlightRequest: state.inFlightRequest,
-		missingProvider: state.missingProvider,
+		missingSetup: state.missingSetup,
 		providerLabel: state.providerLabel,
 		resetComposer,
 		service,
@@ -227,9 +290,12 @@ function useMainPromptAction(
 		setBusy: state.setBusy,
 		setConversations: state.setConversations,
 		setError: state.setError,
+		mergeWorkerTranscriptEntriesForConversation: state.mergeWorkerTranscriptEntriesForConversation,
 		setPendingAssistantMessage: state.setPendingAssistantMessage,
 		setStatus: state.setStatus,
+		setToolCallMessages: state.setToolCallMessages,
 		toolContext,
+		requestApproval,
 		viewStackIsActive
 	})
 }

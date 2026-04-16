@@ -12,21 +12,25 @@ export type ToolCatalogEntry = {
 	scope: string
 }
 
-export const TOOL_CATALOG = TOOL_REGISTRY.map(tool => ({
-	category: tool.metadata.category,
-	description: tool.definition.function.description,
-	execution: tool.metadata.execution,
-	name: tool.name,
-	parameters: buildParameterCatalog(
-		tool.definition.function.parameters.properties,
-		tool.definition.function.parameters.required
-	),
-	restrictions: tool.metadata.restrictions,
-	scope: tool.metadata.scope
-}))
+export const TOOL_CATALOG = buildToolCatalog(TOOL_REGISTRY)
 
 export function getToolCatalogEntry(toolName: string): ToolCatalogEntry | undefined {
 	return TOOL_CATALOG.find(tool => tool.name === toolName)
+}
+
+export function buildToolCatalog(registry = TOOL_REGISTRY): ToolCatalogEntry[] {
+	return registry.map(tool => ({
+		category: tool.metadata.category,
+		description: tool.definition.function.description,
+		execution: tool.metadata.execution,
+		name: tool.name,
+		parameters: buildParameterCatalog(
+			tool.definition.function.parameters.properties,
+			tool.definition.function.parameters.required
+		),
+		restrictions: tool.metadata.restrictions,
+		scope: tool.metadata.scope
+	}))
 }
 
 function buildParameterCatalog(

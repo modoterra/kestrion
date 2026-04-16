@@ -1,0 +1,20 @@
+export type MatrixStepId = 'tone' | 'autonomy' | 'risk' | 'engineering' | 'output' | 'custom' | 'preview'
+
+export type MatrixSelectField =
+	| 'personality'
+	| 'verbosity'
+	| 'collaboration'
+	| 'initiative'
+	| 'planningDepth'
+	| 'escalationThreshold'
+	| 'riskPosture'
+	| 'approvalConservatism'
+	| 'assumptionStyle'
+	| 'codeQuality'
+	| 'testingExpectation'
+	| 'reviewPosture'
+	| 'responseShape'
+	| 'formattingStyle'
+	| 'explanationDepth'
+
+export type MatrixFocusField = MatrixSelectField | 'customInstructions' | 'preview'

@@ -21,7 +21,7 @@ type ProviderConfigKeyboardArgs = {
 	focusFieldCount: number
 	modelOptions: SelectOptionValue[]
 	onReset: () => void
-	onSave: (draft: ProviderDraft) => string | null
+	onSave: (draft: ProviderDraft) => Promise<string | null>
 	popView: () => void
 	resetToInitial: () => void
 	selectedModelIndex: number
@@ -199,7 +199,7 @@ function handleSaveOrResetKey(
 	key: { ctrl?: boolean; name: string; preventDefault: () => void; stopPropagation: () => void },
 	activeProviderId: ProviderTabId,
 	draft: ProviderDraft,
-	onSave: (draft: ProviderDraft) => string | null,
+	onSave: (draft: ProviderDraft) => Promise<string | null>,
 	onReset: () => void,
 	popView: () => void,
 	resetToInitial: () => void,
@@ -210,12 +210,13 @@ function handleSaveOrResetKey(
 	}
 
 	if (key.name === 's') {
-		const nextError = onSave(buildDraftForSave(activeProviderId, draft))
-		if (nextError) {
-			setError(nextError)
-		} else {
-			popView()
-		}
+		void onSave(buildDraftForSave(activeProviderId, draft)).then(nextError => {
+			if (nextError) {
+				return setError(nextError)
+			}
+
+			return popView()
+		})
 
 		preventKeyboardEvent(key)
 		return true

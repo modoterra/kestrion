@@ -1,10 +1,12 @@
+import { resolve } from 'node:path'
+
 import {
+	formatToolPath,
 	getErrorMessage,
 	isIgnoredWorkspacePath,
 	isRecord,
 	parseOptionalPositiveInteger,
-	resolveWorkspacePath,
-	resolveWorkspaceRoot
+	resolveToolDirectoryPath
 } from './common'
 import type { ToolExecutionContext } from './tool-types'
 
@@ -51,15 +53,10 @@ export function executeGlobTool(argumentsJson: string, options: ToolExecutionCon
 
 export function globWorkspacePaths(input: unknown, options: ToolExecutionContext = {}): GlobResult {
 	try {
-		const rootDirectory = resolveWorkspaceRoot(options.workspaceRoot)
 		const argumentsValue = parseGlobArguments(input)
-		const scopeDirectory = argumentsValue.path?.trim()
-			? resolveWorkspacePath(rootDirectory, argumentsValue.path.trim())
-			: rootDirectory
-		const scopePrefix =
-			scopeDirectory === rootDirectory ? '' : `${scopeDirectory.slice(rootDirectory.length + 1).replaceAll('\\', '/')}/`
+		const scopeDirectory = resolveToolDirectoryPath(options, argumentsValue.path?.trim())
 		const matches = Array.from(new Bun.Glob(argumentsValue.pattern).scanSync({ cwd: scopeDirectory, dot: true }))
-			.map(path => `${scopePrefix}${path.replaceAll('\\', '/')}`)
+			.map(path => formatToolPath(options, resolve(scopeDirectory, path)))
 			.filter(path => !isIgnoredWorkspacePath(path))
 			.toSorted((left, right) => left.localeCompare(right))
 		const maxResults = argumentsValue.maxResults ?? DEFAULT_MAX_RESULTS

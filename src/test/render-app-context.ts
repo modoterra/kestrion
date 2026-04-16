@@ -1,7 +1,11 @@
-import { AgentService } from '../lib/agent-service'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { loadWritableAppConfig, saveAppConfig } from '../lib/config'
-import { ConversationStore } from '../lib/conversation-store'
 import { resolveAppPaths } from '../lib/paths'
+import { AgentService } from '../lib/services/agent-service'
+import { ConversationStore } from '../lib/storage/conversation-store'
+import { createTestingToolPolicy, type ToolPolicy } from '../lib/tools/policy'
 import { runRememberTool } from '../lib/tools/remember'
 
 export type MemorySeedEntry = { content: string; tags?: string[]; title?: string }
@@ -9,29 +13,43 @@ export type RenderAppMemory = { episodic?: MemorySeedEntry[]; longTerm?: MemoryS
 
 export function createRenderAppContext(
 	homeDir: string,
-	options: { apiKeyConfigured?: boolean; memory?: RenderAppMemory; providerConfigured?: boolean }
+	options: {
+		apiKeyConfigured?: boolean
+		configureToolPolicy?: (policy: ToolPolicy) => ToolPolicy
+		memory?: RenderAppMemory
+		matrixConfigured?: boolean
+		providerConfigured?: boolean
+	}
 ): {
+	agentService: AgentService
 	config: ReturnType<typeof saveAppConfig>
 	paths: ReturnType<typeof resolveAppPaths>
-	service: AgentService
 	store: ConversationStore
 	writableConfig: ReturnType<typeof loadWritableAppConfig>
 } {
-	const paths = resolveAppPaths({ homeDir })
+	const paths = resolveAppPaths({ homeDir, runtimeDir: `${homeDir}/.runtime/kestrion` })
 	const writableConfig = createWritableConfig(paths, options)
 	const config = saveAppConfig(paths, writableConfig)
 	const store = new ConversationStore(paths.databaseFile)
-	const service = new AgentService(store, config)
+	const toolPolicy = options.configureToolPolicy
+		? options.configureToolPolicy(createTestingToolPolicy())
+		: createTestingToolPolicy()
+	store.saveToolPolicy(toolPolicy)
+	const agentService = new AgentService(store, config)
 
 	seedMemory(paths, options.memory)
 
-	return { config, paths, service, store, writableConfig }
+	return { agentService, config, paths, store, writableConfig }
 }
 
 function createWritableConfig(
 	paths: ReturnType<typeof resolveAppPaths>,
-	options: { apiKeyConfigured?: boolean; providerConfigured?: boolean }
+	options: { apiKeyConfigured?: boolean; matrixConfigured?: boolean; providerConfigured?: boolean }
 ): ReturnType<typeof loadWritableAppConfig> {
+	if (options.matrixConfigured ?? true) {
+		writeMatrixPrompt(paths.configDir)
+	}
+
 	const writableConfig = loadWritableAppConfig(paths)
 	writableConfig.providers.fireworks.providerMode = (options.providerConfigured ?? true) ? 'fireworks' : null
 
@@ -40,6 +58,10 @@ function createWritableConfig(
 	}
 
 	return writableConfig
+}
+
+function writeMatrixPrompt(configDir: string): void {
+	writeFileSync(join(configDir, 'MATRIX.md'), '# Matrix\n\nFollow the shared Kestrion instructions.\n')
 }
 
 function seedMemory(paths: ReturnType<typeof resolveAppPaths>, memory: RenderAppMemory | undefined): void {

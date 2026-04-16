@@ -6,34 +6,40 @@ import { testRender } from '@opentui/react/test-utils'
 import { act } from 'react'
 
 import { App } from '../app'
-import { createRenderAppContext, type RenderAppMemory } from './render-app-context'
+import type { ToolPolicy } from '../lib/tools/policy'
+import { createRenderAppBootstrap, type RenderAppMemory } from './render-app-bootstrap'
+import { seedConversationThread, seedSavedConversations, type SeededConversationFixture } from './seeded-conversations'
 
 type RenderAppOptions = {
 	apiKeyConfigured?: boolean
+	configureToolPolicy?: (policy: ToolPolicy) => ToolPolicy
 	height?: number
 	memory?: RenderAppMemory
+	matrixConfigured?: boolean
 	messages?: Array<{ content: string; role: 'assistant' | 'user' }>
 	onExit?: () => void
 	providerConfigured?: boolean
-	savedConversations?: Array<Array<{ content: string; role: 'assistant' | 'user' }>>
+	savedConversations?: SeededConversationFixture[]
 	width?: number
 }
 
 type TestSetup = Awaited<ReturnType<typeof testRender>>
-type RenderAppContext = ReturnType<typeof createRenderAppContext>
 
 let testSetup: TestSetup | null = null
-const cleanupTasks: Array<() => void> = []
+const cleanupTasks: Array<() => void | Promise<void>> = []
 
-export function cleanupRenderedApp(): void {
+export async function cleanupRenderedApp(): Promise<void> {
 	act(() => {
 		testSetup?.renderer.destroy()
 	})
 	testSetup = null
 
-	for (const cleanup of cleanupTasks.splice(0).toReversed()) {
-		cleanup()
-	}
+	await Promise.all(
+		cleanupTasks
+			.splice(0)
+			.toReversed()
+			.map(cleanup => cleanup())
+	)
 }
 
 export function getTestSetup(): TestSetup {
@@ -46,26 +52,30 @@ export function getTestSetup(): TestSetup {
 
 export async function renderApp(options: RenderAppOptions = {}): Promise<TestSetup> {
 	const homeDir = createHomeDir()
-	const { config, paths, service, store, writableConfig } = createRenderAppContext(homeDir, options)
+	const { agentService, appService, config, controller, paths, store, writableConfig } = await createRenderAppBootstrap(
+		homeDir,
+		options
+	)
+	await seedSavedConversations(agentService, store, config, options.savedConversations ?? [])
+	if (options.messages && options.messages.length > 0) {
+		seedConversationThread(agentService, store, config, options.messages)
+	}
 	cleanupTasks.push(() => {
 		store.close()
 	})
-	await seedSavedConversations(service, store, config, options.savedConversations ?? [])
-	const thread =
-		options.messages && options.messages.length > 0
-			? seedConversationThread(service, store, config, options.messages)
-			: service.getStartupThread()
+	const bootstrap = await controller.bootstrap()
 
 	testSetup = await testRender(
 		<App
 			buildLabel='v1.33.4 (test)'
-			config={config}
-			initialConversations={service.listConversations()}
-			initialThread={thread}
+			config={bootstrap.config}
+			fireworksModels={bootstrap.fireworksModels}
+			initialConversations={bootstrap.conversations}
+			initialThread={bootstrap.thread}
 			initialWritableConfig={writableConfig}
 			onExit={options.onExit}
 			paths={paths}
-			service={service}
+			service={appService}
 		/>,
 		{ height: options.height ?? 40, kittyKeyboard: true, width: options.width ?? 100 }
 	)
@@ -157,31 +167,6 @@ function delay(ms: number): Promise<void> {
 	})
 }
 
-function seedSavedConversations(
-	service: RenderAppContext['service'],
-	store: RenderAppContext['store'],
-	config: RenderAppContext['config'],
-	conversations: Array<Array<{ content: string; role: 'assistant' | 'user' }>>
-): Promise<void> {
-	return seedSavedConversationAtIndex(service, store, config, conversations, 0)
-}
-
-function seedSavedConversationAtIndex(
-	service: RenderAppContext['service'],
-	store: RenderAppContext['store'],
-	config: RenderAppContext['config'],
-	conversations: Array<Array<{ content: string; role: 'assistant' | 'user' }>>,
-	index: number
-): Promise<void> {
-	const messages = conversations[index]
-	if (!messages) {
-		return Promise.resolve()
-	}
-
-	seedConversationThread(service, store, config, messages)
-	return delay(2).then(() => seedSavedConversationAtIndex(service, store, config, conversations, index + 1))
-}
-
 function createHomeDir(): string {
 	const homeDir = mkdtempSync(join(tmpdir(), 'kestrion-app-'))
 	cleanupTasks.push(() => {
@@ -189,49 +174,4 @@ function createHomeDir(): string {
 	})
 
 	return homeDir
-}
-
-function seedConversationThread(
-	service: RenderAppContext['service'],
-	store: RenderAppContext['store'],
-	config: RenderAppContext['config'],
-	messages: Array<{ content: string; role: 'assistant' | 'user' }>
-): ReturnType<RenderAppContext['service']['createDraftConversation']> {
-	let thread = service.createDraftConversation()
-
-	for (const message of messages) {
-		thread =
-			message.role === 'user'
-				? service.addUserMessage(thread.conversation.id, message.content)
-				: appendAssistantMessage(store, service, config, thread, message.content)
-	}
-
-	return thread
-}
-
-function appendAssistantMessage(
-	store: RenderAppContext['store'],
-	service: RenderAppContext['service'],
-	config: RenderAppContext['config'],
-	thread: ReturnType<RenderAppContext['service']['createDraftConversation']>,
-	content: string
-): ReturnType<RenderAppContext['service']['createDraftConversation']> {
-	const savedThread =
-		thread.conversation.id === 'draft'
-			? store.createConversation({
-					model: config.providers.fireworks.model,
-					provider: config.defaultProvider,
-					title: 'Fresh session'
-				})
-			: thread
-
-	store.appendMessage({
-		content,
-		conversationId: savedThread.conversation.id,
-		model: config.providers.fireworks.model,
-		provider: config.defaultProvider,
-		role: 'assistant'
-	})
-
-	return service.loadConversation(savedThread.conversation.id)
 }

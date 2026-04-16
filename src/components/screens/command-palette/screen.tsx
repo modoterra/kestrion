@@ -4,7 +4,7 @@ import { useViewStack } from '../../../lib/navigation/view-stack'
 import { useKeyboardHandler } from '../../../lib/ui/keyboard'
 import { ViewSelect, type ViewSelectOption } from '../../ui/navigation/view-select'
 
-export type CommandPaletteOption = ViewSelectOption<string> & { run: () => void }
+export type CommandPaletteOption = ViewSelectOption<string> & { run: () => void | Promise<void> }
 
 export function CommandPaletteScreen({
 	onSelectCommand,

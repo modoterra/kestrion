@@ -7,6 +7,10 @@ export function buildReadyStatus(config: ResolvedAppConfig): string {
 		return 'Choose a provider.'
 	}
 
+	if (config.matrixPromptError) {
+		return `Waiting for ${config.matrixPromptPath}.`
+	}
+
 	if (fireworks.apiKeySource === 'missing') {
 		return `Waiting for ${fireworks.apiKeyEnv}.`
 	}

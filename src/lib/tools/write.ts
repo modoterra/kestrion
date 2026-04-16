@@ -1,14 +1,7 @@
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-import {
-	getErrorMessage,
-	getRequestedPath,
-	isRecord,
-	normalizeRelativePath,
-	resolveWorkspaceFilePath,
-	resolveWorkspaceRoot
-} from './common'
+import { formatToolPath, getErrorMessage, getRequestedPath, isRecord, resolveToolFilePath } from './common'
 import type { ToolExecutionContext } from './tool-types'
 
 const MAX_WRITE_CHARACTERS = 48_000
@@ -62,9 +55,8 @@ export function writeFileInWorkspace(input: unknown, options: ToolExecutionConte
 }
 
 function buildWriteSuccessResult(input: unknown, options: ToolExecutionContext = {}): WriteSuccessResult {
-	const rootDirectory = resolveWorkspaceRoot(options.workspaceRoot)
 	const argumentsValue = parseWriteArguments(input)
-	const filePath = resolveWorkspaceFilePath(rootDirectory, argumentsValue.path.trim(), { allowMissing: true })
+	const filePath = resolveToolFilePath(options, argumentsValue.path.trim(), { allowMissing: true, write: true })
 	const parentDirectory = dirname(filePath)
 
 	mkdirSync(parentDirectory, { recursive: true })
@@ -74,14 +66,11 @@ function buildWriteSuccessResult(input: unknown, options: ToolExecutionContext =
 	}
 
 	const overwritten = existsSync(filePath)
+	const bytesWritten = Buffer.byteLength(argumentsValue.content, 'utf8')
 	writeFileSync(filePath, argumentsValue.content, 'utf8')
+	options.onMutation?.({ operation: 'write', path: filePath, sizeBytes: bytesWritten, toolName: WRITE_TOOL_NAME })
 
-	return {
-		bytesWritten: Buffer.byteLength(argumentsValue.content, 'utf8'),
-		ok: true,
-		overwritten,
-		path: normalizeRelativePath(rootDirectory, filePath)
-	}
+	return { bytesWritten, ok: true, overwritten, path: formatToolPath(options, filePath) }
 }
 
 function parseWriteArguments(input: unknown): WriteArguments {

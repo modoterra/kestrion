@@ -1,15 +1,15 @@
-import type { ResolvedAppConfig } from './config'
-import type { ConversationStore } from './conversation-store'
-import { createInferenceAdapter } from './inference/registry'
-import type { ToolExecutionContext } from './tools/tool-types'
+import { assertMatrixPromptConfigured, type ResolvedAppConfig } from '../config'
+import { buildInferenceRequest } from '../inference/execution-profile'
+import { createInferenceAdapter } from '../inference/registry'
+import type { ConversationStore } from '../storage/conversation-store'
+import type { ToolExecutionContext } from '../tools/tool-types'
 import type {
 	ConversationSummary,
 	ConversationThread,
 	InferenceEvents,
-	InferenceMessage,
 	ProviderCatalogRecord,
 	ProviderModelRecord
-} from './types'
+} from '../types'
 
 export const DEFAULT_CONVERSATION_TITLE = 'Fresh session'
 export const DRAFT_CONVERSATION_ID = 'draft'
@@ -60,7 +60,8 @@ export class AgentService {
 				title: DEFAULT_CONVERSATION_TITLE,
 				updatedAt: now
 			},
-			messages: []
+			messages: [],
+			toolCallMessages: []
 		}
 	}
 
@@ -82,23 +83,18 @@ export class AgentService {
 		events?: InferenceEvents,
 		toolContext: ToolExecutionContext = {}
 	): Promise<ConversationThread> {
-		const thread = this.loadConversation(conversationId)
+		assertMatrixPromptConfigured(this.config)
+		const thread = this.prepareConversationForReply(conversationId)
 		const adapter = createInferenceAdapter(thread.conversation.provider, this.config, toolContext)
-		const providerConfig = this.config.providers.fireworks
-		const messages: InferenceMessage[] = [
-			{ content: this.config.systemPrompt, role: 'system' },
-			...thread.messages.map(message => ({ content: message.content, role: message.role }))
-		]
-
-		const result = await adapter.complete({
+		const preparedRequest = buildInferenceRequest({
+			config: this.config,
+			conversation: thread.conversation,
 			events,
-			maxTokens: providerConfig.maxTokens,
-			messages,
-			model: thread.conversation.model,
-			promptTruncateLength: providerConfig.promptTruncateLength,
-			signal,
-			temperature: providerConfig.temperature
+			messages: thread.messages,
+			signal
 		})
+
+		const result = await adapter.complete(preparedRequest.request)
 
 		this.store.appendMessage({
 			content: result.content,
@@ -108,6 +104,19 @@ export class AgentService {
 			role: 'assistant'
 		})
 
+		return this.loadConversation(conversationId)
+	}
+
+	prepareConversationForReply(conversationId: string): ConversationThread {
+		const thread = this.loadConversation(conversationId)
+		const nextProvider = this.config.defaultProvider
+		const nextModel = nextProvider === 'fireworks' ? this.config.providers.fireworks.model : thread.conversation.model
+
+		if (thread.conversation.provider === nextProvider && thread.conversation.model === nextModel) {
+			return thread
+		}
+
+		this.store.updateConversationInference(conversationId, nextProvider, nextModel)
 		return this.loadConversation(conversationId)
 	}
 
@@ -150,7 +159,7 @@ export function isDraftConversationId(conversationId: string): boolean {
 	return conversationId === DRAFT_CONVERSATION_ID
 }
 
-function toConversationTitle(content: string): string {
+export function toConversationTitle(content: string): string {
 	const singleLine = content.replaceAll(/\s+/g, ' ').trim()
 	if (!singleLine) {
 		return DEFAULT_CONVERSATION_TITLE

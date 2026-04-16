@@ -1,13 +1,15 @@
 import type { ReactNode } from 'react'
 
 import { useViewStack } from '../../../lib/navigation/view-stack'
-import { getToolCatalogEntry, TOOL_CATALOG } from '../../../lib/tools'
+import { buildToolCatalog } from '../../../lib/tools'
+import { PHASE1_WORKER_TOOL_REGISTRY } from '../../../lib/tools/worker-tool-registry'
 import { ViewSelect, type ViewSelectOption } from '../../ui/navigation/view-select'
 import { ToolDetailScreen } from './detail-screen'
 
 export function ToolsScreen(): ReactNode {
 	const viewStack = useViewStack()
-	const options = TOOL_CATALOG.map<ViewSelectOption<string>>(tool => ({
+	const catalog = buildToolCatalog(PHASE1_WORKER_TOOL_REGISTRY)
+	const options = catalog.map<ViewSelectOption<string>>(tool => ({
 		description: buildToolListDescription(tool.category, tool.execution, tool.scope),
 		title: tool.name,
 		value: tool.name
@@ -16,7 +18,7 @@ export function ToolsScreen(): ReactNode {
 	return (
 		<ViewSelect
 			onSelect={option => {
-				const tool = getToolCatalogEntry(String(option.value))
+				const tool = catalog.find(entry => entry.name === String(option.value))
 				if (!tool) {
 					return
 				}

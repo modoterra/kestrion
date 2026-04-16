@@ -35,5 +35,5 @@ test('bootstraps the Drizzle migration journal for an existing legacy database',
 	database.close()
 
 	expect(userVersion).toBe(4)
-	expect(drizzleMigrationCount.count).toBe(1)
+	expect(drizzleMigrationCount.count).toBe(4)
 })
