@@ -1,5 +1,5 @@
 import type { FireworksProviderConfig } from '../config'
-import { executeToolCall, TOOL_DEFINITIONS } from '../tools'
+import { executeToolCall, getToolDefinitions } from '../tools'
 import type { ToolExecutionContext } from '../tools/tool-types'
 import type { InferenceEvents, InferenceMessage, InferenceRequest, InferenceResult, InferenceToolCall } from '../types'
 import { createStreamedFireworksMessage, readChatCompletionStream } from './fireworks-stream'
@@ -9,9 +9,12 @@ import {
 	type FireworksResponseMessage,
 	type FireworksToolCall
 } from './fireworks-types'
+import { consumeTestFireworksFetch } from './test-fireworks-fetch-scenarios'
+import { consumeTestFireworksResponse } from './test-fireworks-response-queue'
 import type { InferenceAdapter } from './types'
 
 const MAX_TOOL_ROUND_TRIPS = 4
+const TEST_TOOL_CALL_DELAY_ENV = 'KESTRION_TEST_TOOL_CALL_DELAY_MS'
 
 type FireworksResponse = {
 	choices?: Array<{ message?: FireworksResponseMessage }>
@@ -32,6 +35,11 @@ export class FireworksAdapter implements InferenceAdapter {
 	) {}
 
 	async complete(request: InferenceRequest): Promise<InferenceResult> {
+		const testResponse = consumeTestFireworksResponse(request)
+		if (testResponse) {
+			return testResponse
+		}
+
 		if (!this.config.apiKey) {
 			throw new Error(`Missing Fireworks API key. Set ${this.config.apiKeyEnv} or update ${this.configFile}.`)
 		}
@@ -92,20 +100,25 @@ export class FireworksAdapter implements InferenceAdapter {
 		messages: FireworksRequestMessage[],
 		allowTools: boolean
 	): Promise<{ message: FireworksResponseMessage; payload: FireworksResponse; toolsEnabled: boolean }> {
-		const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+		const requestInit = {
 			body: JSON.stringify({
 				max_tokens: request.maxTokens,
 				messages,
 				model: request.model,
 				prompt_truncate_len: request.promptTruncateLength,
+				...(request.reasoningEffort ? { reasoning_effort: request.reasoningEffort } : {}),
 				stream: false,
 				temperature: request.temperature,
-				...(allowTools ? { tool_choice: 'auto', tools: TOOL_DEFINITIONS } : {})
+				...(request.topP !== undefined ? { top_p: request.topP } : {}),
+				...(allowTools ? { tool_choice: 'auto', tools: getToolDefinitions(this.toolContext.toolRegistry) } : {})
 			}),
 			headers: { Authorization: `Bearer ${this.config.apiKey}`, 'Content-Type': 'application/json' },
 			method: 'POST',
 			signal: request.signal
-		})
+		} satisfies RequestInit
+		const response =
+			(await consumeTestFireworksFetch(requestInit)) ??
+			(await fetch(`${this.config.baseUrl}/chat/completions`, requestInit))
 
 		const payload = (await response.json()) as FireworksResponse
 
@@ -126,20 +139,25 @@ export class FireworksAdapter implements InferenceAdapter {
 		messages: FireworksRequestMessage[],
 		allowTools: boolean
 	): Promise<{ message: FireworksResponseMessage; payload: FireworksResponse; toolsEnabled: boolean }> {
-		const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+		const requestInit = {
 			body: JSON.stringify({
 				max_tokens: request.maxTokens,
 				messages,
 				model: request.model,
 				prompt_truncate_len: request.promptTruncateLength,
+				...(request.reasoningEffort ? { reasoning_effort: request.reasoningEffort } : {}),
 				stream: true,
 				temperature: request.temperature,
-				...(allowTools ? { tool_choice: 'auto', tools: TOOL_DEFINITIONS } : {})
+				...(request.topP !== undefined ? { top_p: request.topP } : {}),
+				...(allowTools ? { tool_choice: 'auto', tools: getToolDefinitions(this.toolContext.toolRegistry) } : {})
 			}),
 			headers: { Authorization: `Bearer ${this.config.apiKey}`, 'Content-Type': 'application/json' },
 			method: 'POST',
 			signal: request.signal
-		})
+		} satisfies RequestInit
+		const response =
+			(await consumeTestFireworksFetch(requestInit)) ??
+			(await fetch(`${this.config.baseUrl}/chat/completions`, requestInit))
 
 		if (!response.ok) {
 			const payload = (await response.json()) as FireworksResponse
@@ -211,6 +229,7 @@ async function executeToolCallsWithEvents(
 	events?.onToolCallsStart?.(inferenceToolCalls)
 
 	try {
+		await waitForTestToolDelay()
 		return await Promise.all(toolCalls.map(toolCall => toToolResultMessage(toolCall, context)))
 	} finally {
 		events?.onToolCallsFinish?.(inferenceToolCalls)
@@ -246,4 +265,15 @@ function toInferenceToolCall(toolCall: FireworksToolCall): InferenceToolCall {
 		id: toolCall.id ?? '',
 		name: toolCall.function?.name ?? ''
 	}
+}
+
+function waitForTestToolDelay(): Promise<void> {
+	const delayMs = Number.parseInt(process.env[TEST_TOOL_CALL_DELAY_ENV] ?? '', 10)
+	if (!Number.isFinite(delayMs) || delayMs <= 0) {
+		return Promise.resolve()
+	}
+
+	return new Promise(resolve => {
+		setTimeout(resolve, delayMs)
+	})
 }

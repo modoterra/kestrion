@@ -27,12 +27,23 @@ export function compactProviderName(value: string): string {
 	return value.replace(/\s+AI$/, '')
 }
 
-export function renderEventMeta(providerLabel: string, model: string, spinner: string): string {
-	return `${compactProviderName(providerLabel)} · ${compactModelName(model)} · ${spinner}`
+export function formatElapsedDuration(seconds: number): string {
+	const totalSeconds = Math.max(0, Math.floor(seconds))
+	const minutes = Math.floor(totalSeconds / 60)
+	const remainingSeconds = totalSeconds % 60
+	return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
+}
+
+export function renderEventMeta(providerLabel: string, model: string): string {
+	return `${compactProviderName(providerLabel)} · ${compactModelName(model)}`
 }
 
 export function compactModelName(value: string): string {
 	const modelName = (value.split('/').at(-1) ?? value).replace(/-instruct$/, '')
+	if (modelName === 'kimi-k2p5') {
+		return 'Kimi K2.5'
+	}
+
 	return truncate(modelName, 18)
 }
 

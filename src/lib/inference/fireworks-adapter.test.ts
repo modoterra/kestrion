@@ -42,12 +42,16 @@ test('formats Fireworks chat completion requests', async () => {
 		messages: [{ content: 'Hello', role: 'user' }],
 		model: 'demo-model',
 		promptTruncateLength: 2048,
-		temperature: 0.2
+		reasoningEffort: 'none',
+		temperature: 0.2,
+		topP: 0.95
 	})
 
 	const parsedBody = JSON.parse(requestBody) as {
 		max_tokens: number
 		prompt_truncate_len: number
+		reasoning_effort?: string
+		top_p?: number
 		tool_choice?: string
 		tools?: Array<{ function?: { name?: string } }>
 	}
@@ -56,6 +60,8 @@ test('formats Fireworks chat completion requests', async () => {
 	expect(requestAuthHeader).toBe('Bearer demo-key')
 	expect(parsedBody.max_tokens).toBe(256)
 	expect(parsedBody.prompt_truncate_len).toBe(2048)
+	expect(parsedBody.reasoning_effort).toBe('none')
+	expect(parsedBody.top_p).toBe(0.95)
 	expect(parsedBody.tool_choice).toBe('auto')
 	expect(parsedBody.tools?.map(tool => tool.function?.name)).toEqual(EXPECTED_TOOL_NAMES)
 	expect(result.content).toBe('Hello from Fireworks')

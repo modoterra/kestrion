@@ -1,3 +1,5 @@
+/* eslint-disable max-lines */
+
 import { afterEach, expect, test } from 'bun:test'
 
 import {
@@ -12,13 +14,14 @@ import {
 	waitForFrameContent
 } from './test/app-test-utils'
 import { findLineIndex, findLineStart, tailLines } from './test/frame-test-utils'
-import { mockFireworksTextResponses } from './test/mock-fireworks-text-responses'
+import { clearMockFireworksTextResponses, mockFireworksTextResponses } from './test/mock-fireworks-text-responses'
 
 const originalFetch = globalThis.fetch
 
-afterEach(() => {
-	cleanupRenderedApp()
+afterEach(async () => {
+	await cleanupRenderedApp()
 	globalThis.fetch = originalFetch
+	clearMockFireworksTextResponses()
 })
 
 test('starts in a new empty conversation when a provider is configured', async () => {
@@ -32,7 +35,18 @@ test('starts in a new empty conversation when a provider is configured', async (
 	expect(versionLine).toBeGreaterThanOrEqual(0)
 	expect(versionLine).toBeLessThan(6)
 	expect(composerLine).toBeGreaterThan(30)
-	expect(tail).toContain('ctrl+r sessions')
+	expect(tail).toContain('ctrl+r')
+	expect(tail).toContain('sessions')
+	expect(frame).toContain('Fireworks')
+	expect(frame).toContain('provider')
+	expect(frame).toContain('Kimi K2.5')
+	expect(frame).toContain('model')
+	expect(frame).toContain('6k')
+	expect(frame).toContain('ctx')
+	expect(frame).toContain('█')
+	expect(frame).toContain('1k')
+	expect(frame).toContain('out')
+	expect(frame).toContain('ready')
 	expect(frame).not.toContain('Ask anything... "Fix a TODO in the codebase"')
 	expect(frame).not.toContain('Ask the agent anything...')
 })
@@ -113,7 +127,7 @@ test('submits a second Enter press after the first fresh-conversation reply', as
 	expect(secondReplyFrame).toContain('Reply 2')
 })
 
-test('keeps the composer ready after reopening a saved conversation and after each reply', async () => {
+test('shows the last successful turn marker after reopening a saved conversation and after each reply', async () => {
 	mockFireworksTextResponses(['Reply 1', 'Reply 2'])
 
 	await renderApp({
@@ -128,9 +142,11 @@ test('keeps the composer ready after reopening a saved conversation and after ea
 
 	const firstReplyFrame = await submitComposerMessageAndWaitForReply('First follow-up', 'Reply 1')
 	expect(firstReplyFrame).toContain('First follow-up')
+	expect(firstReplyFrame).toContain('v done')
 
 	const secondReplyFrame = await submitComposerMessageAndWaitForReply('Second follow-up', 'Reply 2')
 	expect(secondReplyFrame).toContain('Second follow-up')
+	expect(secondReplyFrame).toContain('v done')
 })
 
 test('renders assistant content left and user prompt cards right', async () => {
@@ -172,7 +188,12 @@ test('keeps footer status and shortcuts readable on narrower terminals', async (
 	const tail = tailLines(frame, 12)
 
 	expect(tail).toContain('Ask anything...')
-	expect(tail).toContain('ctrl+r sessions')
+	expect(tail).toContain('ctrl+r')
+	expect(tail).toContain('sessions')
+	expect(frame).toContain('ctx')
+	expect(frame).not.toContain('out')
+	expect(frame).not.toContain('temp')
+	expect(frame).toContain('ready')
 })
 
 test('opens and closes the sessions view with Ctrl+R', async () => {
