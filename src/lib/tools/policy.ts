@@ -39,7 +39,9 @@ export function authorizeToolCall(
 
 	switch (toolName) {
 		case 'bash':
-			return denyTool(toolName, 'Tool "bash" is disabled by policy.')
+			return policy.tools.bash.allowed
+				? { context: {}, ok: true }
+				: denyTool(toolName, 'Tool "bash" is disabled by policy.')
 		case 'read':
 		case 'list':
 		case 'grep':

@@ -7,7 +7,13 @@ import { PresetSection } from './sections'
 type LimitPresetGroupProps = {
 	currentField: FocusField
 	explanation: string
-	field: 'maxTokens' | 'promptTruncateLength' | 'temperature'
+	field:
+		| 'maxTokens'
+		| 'promptTruncateLength'
+		| 'compactTailTurns'
+		| 'compactAutoTurnThreshold'
+		| 'compactAutoPromptChars'
+		| 'temperature'
 	onAdvance: () => void
 	onSelect: (value: string) => void
 	options: SelectOption[]
@@ -16,10 +22,19 @@ type LimitPresetGroupProps = {
 }
 
 export type LimitsSectionProps = {
+	compactAutoPromptCharsIndex: number
+	compactAutoPromptCharsOptions: SelectOption[]
+	compactAutoTurnThresholdIndex: number
+	compactAutoTurnThresholdOptions: SelectOption[]
+	compactTailTurnsIndex: number
+	compactTailTurnsOptions: SelectOption[]
 	currentField: FocusField
 	maxTokenIndex: number
 	maxTokenOptions: SelectOption[]
 	onAdvance: () => void
+	onSelectCompactAutoPromptChars: (value: string) => void
+	onSelectCompactAutoTurnThreshold: (value: string) => void
+	onSelectCompactTailTurns: (value: string) => void
 	onSelectMaxTokens: (value: string) => void
 	onSelectPromptTruncateLength: (value: string) => void
 	onSelectTemperature: (value: string) => void
@@ -58,10 +73,19 @@ function LimitPresetGroup(props: LimitPresetGroupProps): ReactNode {
 }
 
 function buildLimitPresetGroups({
+	compactAutoPromptCharsIndex,
+	compactAutoPromptCharsOptions,
+	compactAutoTurnThresholdIndex,
+	compactAutoTurnThresholdOptions,
+	compactTailTurnsIndex,
+	compactTailTurnsOptions,
 	currentField,
 	maxTokenIndex,
 	maxTokenOptions,
 	onAdvance,
+	onSelectCompactAutoPromptChars,
+	onSelectCompactAutoTurnThreshold,
+	onSelectCompactTailTurns,
 	onSelectMaxTokens,
 	onSelectPromptTruncateLength,
 	onSelectTemperature,
@@ -90,6 +114,36 @@ function buildLimitPresetGroups({
 			options: promptTruncateOptions,
 			selectedIndex: promptTruncateIndex,
 			title: 'Prompt Truncation'
+		},
+		{
+			currentField,
+			explanation: 'Keep this many most recent turns raw after a checkpoint summary is created.',
+			field: 'compactTailTurns',
+			onAdvance,
+			onSelect: onSelectCompactTailTurns,
+			options: compactTailTurnsOptions,
+			selectedIndex: compactTailTurnsIndex,
+			title: 'Compact Tail Turns'
+		},
+		{
+			currentField,
+			explanation: 'Auto-compact when the raw suffix after the checkpoint grows past this many turns.',
+			field: 'compactAutoTurnThreshold',
+			onAdvance,
+			onSelect: onSelectCompactAutoTurnThreshold,
+			options: compactAutoTurnThresholdOptions,
+			selectedIndex: compactAutoTurnThresholdIndex,
+			title: 'Auto Compact Turns'
+		},
+		{
+			currentField,
+			explanation: 'Auto-compact when the serialized raw suffix grows past this many characters.',
+			field: 'compactAutoPromptChars',
+			onAdvance,
+			onSelect: onSelectCompactAutoPromptChars,
+			options: compactAutoPromptCharsOptions,
+			selectedIndex: compactAutoPromptCharsIndex,
+			title: 'Auto Compact Chars'
 		},
 		{
 			currentField,

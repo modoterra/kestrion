@@ -139,6 +139,12 @@ function ProviderConfigBody({
 				gap={1}>
 				<ProviderConfigStepContent
 					activeProviderId={state.activeProviderId}
+					compactAutoPromptCharsIndex={state.compactAutoPromptCharsIndex}
+					compactAutoPromptCharsOptions={state.compactAutoPromptCharsOptions}
+					compactAutoTurnThresholdIndex={state.compactAutoTurnThresholdIndex}
+					compactAutoTurnThresholdOptions={state.compactAutoTurnThresholdOptions}
+					compactTailTurnsIndex={state.compactTailTurnsIndex}
+					compactTailTurnsOptions={state.compactTailTurnsOptions}
 					currentField={state.currentField}
 					currentStep={state.currentStep}
 					draft={state.draft}
@@ -150,6 +156,9 @@ function ProviderConfigBody({
 					onAdvance={state.advanceWizardGroup}
 					onModelSearchChange={state.updateModelQuery}
 					onProviderSearchChange={state.updateProviderQuery}
+					onSelectCompactAutoPromptChars={value => state.updateDraftField('compactAutoPromptChars', value)}
+					onSelectCompactAutoTurnThreshold={value => state.updateDraftField('compactAutoTurnThreshold', value)}
+					onSelectCompactTailTurns={value => state.updateDraftField('compactTailTurns', value)}
 					onSelectMaxTokens={value => state.updateDraftField('maxTokens', value)}
 					onSelectModel={state.updateSelectedModel}
 					onSelectPromptTruncateLength={value => state.updateDraftField('promptTruncateLength', value)}

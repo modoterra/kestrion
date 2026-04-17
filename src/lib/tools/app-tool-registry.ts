@@ -14,7 +14,8 @@ export const APP_TOOL_REGISTRY: RegisteredTool[] = [
 			execution: 'local',
 			restrictions: [
 				'Loads skills from ~/.share/kestrion/skills only.',
-				'Reads SKILL.md and optional included files.',
+				'Loads only signed and trusted skill directories.',
+				'Reads SKILL.md and optional included files without executing plugins.',
 				'Rejects paths outside the chosen skill directory.'
 			],
 			scope: 'app-storage'
@@ -43,9 +44,9 @@ export const APP_TOOL_REGISTRY: RegisteredTool[] = [
 			category: 'agent memory',
 			execution: 'local',
 			restrictions: [
-				'Stores data in the app data directory.',
+				'Stores signed memory records in the app data directory.',
 				'Supports scratch, episodic, and long-term memory.',
-				'Returns the most recent entries first.'
+				'Ignores unsigned, tampered, untrusted, or stale memory when reading.'
 			],
 			scope: 'app-storage'
 		},
@@ -74,6 +75,7 @@ export const APP_TOOL_REGISTRY: RegisteredTool[] = [
 			execution: 'network',
 			restrictions: [
 				'Accepts absolute http:// or https:// URLs only.',
+				'Runs through the daemon fetch gateway with address and MIME validation.',
 				'Returns text responses only.',
 				'Truncates output to 20,000 characters by default.'
 			],

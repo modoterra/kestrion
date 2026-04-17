@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import type { TurnActivityState } from '../../../lib/app/main-screen-turn-activity-state'
 import { getTemperatureSummary } from '../../../lib/provider-config/utils'
 import type { ActivityIndicatorVariant } from '../../../lib/ui/activity-indicator'
-import { RHYTHM, THEME } from '../../../lib/ui/constants'
+import { THEME } from '../../../lib/ui/constants'
 import {
 	EMPTY_CONTEXT_GLYPH_COLOR,
 	getContextUsageGlyphColor,
@@ -31,6 +31,7 @@ type TurnActivityRailProps = {
 	providerLabel: string
 	providerMode: 'custom' | 'fireworks' | null
 	spinnerFrameIndex: number
+	status: string
 	temperature: number
 	turnActivity: TurnActivityState
 	width: number
@@ -48,16 +49,16 @@ type RailGroupsArgs = {
 }
 
 export function TurnActivityRail(props: TurnActivityRailProps): ReactNode {
-	const identityWidth = Math.max(18, Math.floor(props.width * 0.68))
+	const statusNotice = props.turnActivity.phase === 'idle' ? buildStatusNotice(props.status, props.width) : null
+	const identityWidth = Math.max(18, Math.floor(props.width * (statusNotice ? 0.5 : 0.68)))
 	const activityWidth = Math.max(12, props.width - identityWidth - 4)
-	const activityLabel = buildActivityLabel(props.turnActivity, activityWidth)
+	const activityLabel = buildActivityLabel(props.turnActivity, activityWidth, props.status)
 
 	return (
 		<box
 			flexDirection='column'
-			height={2}
+			height={1}
 			justifyContent='flex-end'
-			paddingTop={RHYTHM.stack}
 			width='100%'>
 			<box
 				alignItems='center'
@@ -226,9 +227,9 @@ function buildContextUsageBar(usedChars: number, limitChars: number, slots: numb
 	})
 }
 
-function buildActivityLabel(turnActivity: TurnActivityState, width: number): ActivityLabel {
+function buildActivityLabel(turnActivity: TurnActivityState, width: number, status: string): ActivityLabel {
 	if (turnActivity.phase === 'idle') {
-		return { indicatorVariant: null, text: buildIdleLabel(turnActivity, width) }
+		return { indicatorVariant: null, text: buildIdleLabel(turnActivity, width, status) }
 	}
 
 	if (turnActivity.phase === 'failed') {
@@ -247,10 +248,48 @@ function buildActivityLabel(turnActivity: TurnActivityState, width: number): Act
 	}
 }
 
-function buildIdleLabel(turnActivity: TurnActivityState, width: number): string {
+function buildIdleLabel(turnActivity: TurnActivityState, width: number, status: string): string {
+	const statusNotice = buildStatusNotice(status, width)
+	if (statusNotice) {
+		return statusNotice
+	}
+
 	const lastTurnLabel = buildLastTurnLabel(turnActivity)
 	const idleLabel = lastTurnLabel ? `${lastTurnLabel} · ready` : 'ready'
 	return truncate(idleLabel, Math.max(14, Math.floor(width * 0.4)))
+}
+
+function buildStatusNotice(status: string, width: number): string | null {
+	if (!shouldShowStatusNotice(status)) {
+		return null
+	}
+
+	return truncate(status, Math.max(24, width - 2))
+}
+
+function shouldShowStatusNotice(status: string): boolean {
+	if (status.length === 0) {
+		return false
+	}
+
+	if (status === 'Choose a provider.' || status === 'Composer ready.') {
+		return false
+	}
+
+	if (status.startsWith('Ready on ') || status.startsWith('Waiting for ')) {
+		return false
+	}
+
+	if (
+		status.endsWith(' replied.') ||
+		status.includes(' is replying...') ||
+		status.includes(' is thinking...') ||
+		status.includes(' is using ')
+	) {
+		return false
+	}
+
+	return true
 }
 
 function buildLastTurnLabel(turnActivity: TurnActivityState): string {

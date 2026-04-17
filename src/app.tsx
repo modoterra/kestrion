@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { AppErrorBoundary } from './components/app/app-error-boundary'
 import './opentui-extensions'
 import { MainScreen } from './components/screens/main/screen'
 import type { AppProps } from './lib/app/types'
@@ -8,10 +9,12 @@ import { KeyboardProvider } from './lib/ui/keyboard'
 
 export function App(props: AppProps): ReactNode {
 	return (
-		<ViewStackProvider>
-			<KeyboardProvider>
-				<MainScreen {...props} />
-			</KeyboardProvider>
-		</ViewStackProvider>
+		<AppErrorBoundary>
+			<ViewStackProvider>
+				<KeyboardProvider>
+					<MainScreen {...props} />
+				</KeyboardProvider>
+			</ViewStackProvider>
+		</AppErrorBoundary>
 	)
 }

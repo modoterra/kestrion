@@ -23,7 +23,14 @@ export function getStepFocusFields(step: StepId): FocusField[] {
 		case 'model':
 			return ['modelSearch', 'modelSelect']
 		case 'limits':
-			return ['maxTokens', 'promptTruncateLength', 'temperature']
+			return [
+				'maxTokens',
+				'promptTruncateLength',
+				'compactTailTurns',
+				'compactAutoTurnThreshold',
+				'compactAutoPromptChars',
+				'temperature'
+			]
 		case 'credentials':
 			return ['apiKey', 'apiKeyEnv']
 		case 'advanced':
@@ -38,7 +45,14 @@ export function getStepFocusGroups(step: StepId): FocusField[][] {
 		case 'model':
 			return [['modelSearch', 'modelSelect']]
 		case 'limits':
-			return [['maxTokens'], ['promptTruncateLength'], ['temperature']]
+			return [
+				['maxTokens'],
+				['promptTruncateLength'],
+				['compactTailTurns'],
+				['compactAutoTurnThreshold'],
+				['compactAutoPromptChars'],
+				['temperature']
+			]
 		case 'credentials':
 			return [['apiKey'], ['apiKeyEnv']]
 		case 'advanced':

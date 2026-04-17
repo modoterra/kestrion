@@ -12,6 +12,8 @@ export function createRenderAppBootstrap(
 		apiKeyConfigured?: boolean
 		configureToolPolicy?: (policy: ToolPolicy) => ToolPolicy
 		memory?: RenderAppMemory
+		mcpConfigured?: boolean
+		mcpEndpoint?: string
 		matrixConfigured?: boolean
 		providerConfigured?: boolean
 	}

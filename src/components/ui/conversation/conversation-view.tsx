@@ -33,6 +33,7 @@ type ConversationViewProps = {
 	sessionTitle: string
 	shellWidth: number
 	spinnerFrameIndex: number
+	status: string
 	temperature: number
 	toolCallMessages: ToolCallMessageRecord[]
 	turnActivity: TurnActivityState
@@ -139,6 +140,7 @@ function ConversationComposerSection({
 			providerMode={props.providerMode}
 			shellWidth={props.shellWidth}
 			spinnerFrameIndex={props.spinnerFrameIndex}
+			status={props.status}
 			temperature={props.temperature}
 			turnActivity={props.turnActivity}
 		/>

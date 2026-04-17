@@ -85,7 +85,7 @@ export function normalizeToolPolicy(value: unknown): ToolPolicy {
 	return {
 		promptSuppressions: normalizeStringList(value.promptSuppressions),
 		tools: {
-			bash: { allowed: false },
+			bash: { allowed: normalizeBoolean((tools.bash as { allowed?: unknown } | undefined)?.allowed) },
 			edit: {
 				readRoots: normalizeVirtualRoots((tools.edit as { readRoots?: unknown } | undefined)?.readRoots),
 				writeRoots: normalizeVirtualRoots((tools.edit as { writeRoots?: unknown } | undefined)?.writeRoots)

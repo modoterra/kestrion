@@ -111,6 +111,18 @@ export function applyCuratedKimiCatalogMigration(database: Database): void {
 	database.exec('PRAGMA user_version = 5;')
 }
 
+export function applyConversationCompactionMigration(database: Database): void {
+	database.exec(`
+		CREATE TABLE IF NOT EXISTS conversation_compaction (
+			conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+			compacted_through_message_id TEXT NOT NULL,
+			summary TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+	`)
+	database.exec('PRAGMA user_version = 6;')
+}
+
 export function migrateAppDatabase(database: Database): void {
 	let version = (database.prepare('PRAGMA user_version').get() as { user_version?: number } | null)?.user_version ?? 0
 
@@ -136,6 +148,11 @@ export function migrateAppDatabase(database: Database): void {
 
 	if (version < 5) {
 		applyCuratedKimiCatalogMigration(database)
+		version = 5
+	}
+
+	if (version < 6) {
+		applyConversationCompactionMigration(database)
 	}
 }
 

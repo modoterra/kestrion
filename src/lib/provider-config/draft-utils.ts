@@ -4,7 +4,14 @@ import type { ProviderDraft } from './fields'
 export function buildWritableConfig(currentConfig: WritableAppConfig, draft: ProviderDraft): WritableAppConfig {
 	const apiKeyEnv = draft.apiKeyEnv.trim() || 'FIREWORKS_API_KEY'
 	const baseUrl = draft.baseUrl.trim()
+	const compactTailTurns = parseIntegerField('Compact tail turns', draft.compactTailTurns, 1)
+	const compactAutoTurnThreshold = parseIntegerField(
+		'Auto compact turn threshold',
+		draft.compactAutoTurnThreshold,
+		1
+	)
 	const model = draft.model.trim()
+	const compactAutoPromptChars = parseIntegerField('Auto compact prompt chars', draft.compactAutoPromptChars, 1)
 
 	if (!baseUrl) {
 		throw new Error('Base URL cannot be empty.')
@@ -12,6 +19,10 @@ export function buildWritableConfig(currentConfig: WritableAppConfig, draft: Pro
 
 	if (!model) {
 		throw new Error('Model cannot be empty.')
+	}
+
+	if (compactAutoTurnThreshold <= compactTailTurns) {
+		throw new Error('Auto compact turn threshold must be greater than compact tail turns.')
 	}
 
 	return {
@@ -22,6 +33,9 @@ export function buildWritableConfig(currentConfig: WritableAppConfig, draft: Pro
 				apiKey: draft.apiKey.trim(),
 				apiKeyEnv,
 				baseUrl,
+				compactAutoPromptChars,
+				compactAutoTurnThreshold,
+				compactTailTurns,
 				maxTokens: parseIntegerField('Max tokens', draft.maxTokens, 1),
 				model,
 				promptTruncateLength: parseIntegerField('Prompt truncate length', draft.promptTruncateLength, 1),
@@ -37,6 +51,9 @@ export function toProviderDraft(config: WritableAppConfig): ProviderDraft {
 		apiKey: config.providers.fireworks.apiKey,
 		apiKeyEnv: config.providers.fireworks.apiKeyEnv,
 		baseUrl: config.providers.fireworks.baseUrl,
+		compactAutoPromptChars: String(config.providers.fireworks.compactAutoPromptChars),
+		compactAutoTurnThreshold: String(config.providers.fireworks.compactAutoTurnThreshold),
+		compactTailTurns: String(config.providers.fireworks.compactTailTurns),
 		maxTokens: String(config.providers.fireworks.maxTokens),
 		model: config.providers.fireworks.model,
 		promptTruncateLength: String(config.providers.fireworks.promptTruncateLength),

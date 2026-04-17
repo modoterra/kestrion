@@ -12,6 +12,7 @@ import type { AppProps } from '../../../lib/app/types'
 import { useViewStack } from '../../../lib/navigation/view-stack'
 import type { ToolApprovalPrompt, ToolApprovalResponse } from '../../../lib/types'
 import {
+	useMcpOverlayActions,
 	useMatrixOverlayActions,
 	useProviderOverlayActions,
 	useSessionsOverlayAction,
@@ -24,6 +25,7 @@ import { useTranscriptOverlayAction } from './transcript-overlay'
 
 type MainScreenOverlayActions = {
 	openCommandPalette: () => void
+	openMcpConfig: () => void
 	openMemoryView: () => void
 	openMatrixSetup: () => void
 	openProviderConfig: () => void
@@ -77,6 +79,7 @@ function useMainScreenOverlays(
 	coreActions: MainScreenCoreActions,
 	viewStack: ReturnType<typeof useViewStack>
 ): MainScreenOverlayActions {
+	const { openMcpConfig } = useMcpOverlay(props, state, viewStack)
 	const { openMatrixSetup } = useMatrixOverlay(props, state, viewStack)
 	const { openProviderConfig } = useProviderOverlay(props, state, viewStack)
 	const { openSessionsView } = useSessionsOverlay(props, state, coreActions, viewStack)
@@ -89,6 +92,7 @@ function useMainScreenOverlays(
 	const { openCommandPalette } = usePaletteOverlayActions(
 		state,
 		coreActions,
+		openMcpConfig,
 		openMemoryView,
 		openMatrixSetup,
 		openProviderConfig,
@@ -101,6 +105,7 @@ function useMainScreenOverlays(
 
 	return {
 		openCommandPalette,
+		openMcpConfig,
 		openMemoryView,
 		openMatrixSetup,
 		openProviderConfig,
@@ -126,6 +131,25 @@ function useMatrixOverlay(
 		setResolvedConfig: state.setResolvedConfig,
 		setStatus: state.setStatus,
 		viewStack
+	})
+}
+
+function useMcpOverlay(
+	props: AppProps,
+	state: MainScreenState,
+	viewStack: ReturnType<typeof useViewStack>
+): ReturnType<typeof useMcpOverlayActions> {
+	return useMcpOverlayActions({
+		busy: state.busy,
+		mcpCloseStatusRef: state.mcpCloseStatusRef,
+		paths: props.paths,
+		service: props.service,
+		setError: state.setError,
+		setResolvedConfig: state.setResolvedConfig,
+		setStatus: state.setStatus,
+		setWritableConfig: state.setWritableConfig,
+		viewStack,
+		writableConfig: state.writableConfig
 	})
 }
 
@@ -178,7 +202,7 @@ function useBrowserOverlayActions(
 ): Pick<MainScreenOverlayActions, 'openMemoryView' | 'openShortcutsView' | 'openToolsView' | 'openTranscriptView'> {
 	const { openShortcutsView } = useShortcutsOverlayAction({ busy, setStatus, viewStack })
 	const { openMemoryView } = useMemoryOverlayAction({ busy, service, setStatus, viewStack })
-	const { openToolsView } = useToolsOverlayAction({ busy, setStatus, viewStack })
+	const { openToolsView } = useToolsOverlayAction({ busy, service, setStatus, viewStack })
 	const { openTranscriptView } = useTranscriptOverlayAction({ busy, setStatus, viewStack })
 
 	return { openMemoryView, openShortcutsView, openToolsView, openTranscriptView }
@@ -236,6 +260,7 @@ function useMainScreenCoreActions(
 function usePaletteOverlayActions(
 	state: MainScreenState,
 	coreActions: MainScreenCoreActions,
+	openMcpConfig: () => void,
 	openMemoryView: () => void,
 	openMatrixSetup: () => void,
 	openProviderConfig: () => void,
@@ -246,7 +271,9 @@ function usePaletteOverlayActions(
 	viewStack: ReturnType<typeof useViewStack>
 ): Pick<MainScreenOverlayActions, 'openCommandPalette'> {
 	const commandPaletteOptions = useCommandPaletteOptions({
+		compactConversation: coreActions.compactConversation,
 		createConversation: coreActions.createConversation,
+		openMcpConfig,
 		openMemoryView,
 		openMatrixSetup,
 		openProviderConfig,

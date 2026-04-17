@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 
 import type { ResolvedAppConfig } from '../config'
 import type { ConversationRecord, MessageRecord } from '../types'
-import { buildInferenceRequest } from './execution-profile'
+import { buildInferenceRequest, getPreparedInferenceUsageChars } from './execution-profile'
 
 test('uses the generic fallback for unknown models', () => {
 	const prepared = buildInferenceRequest({
@@ -79,10 +79,69 @@ test('matches the curated Kimi profile for the Fireworks turbo router id', () =>
 	expect(prepared.request.reasoningEffort).toBe('none')
 })
 
+test('injects a conversation checkpoint summary and only sends the raw suffix after it', () => {
+	const messages = [
+		createMessage('user', 'Initial goal'),
+		createMessage('assistant', 'Initial reply'),
+		createMessage('user', 'Recent ask')
+	]
+	const prepared = buildInferenceRequest({
+		compaction: {
+			compactedThroughMessageId: messages[1]!.id,
+			conversationId: 'conversation-1',
+			summary: 'Goal established and first reply delivered.',
+			updatedAt: '2026-04-15T00:00:00.000Z'
+		},
+		config: createResolvedConfig(),
+		conversation: createConversation(),
+		messages
+	})
+
+	expect(prepared.request.messages.map(message => message.role)).toEqual(['system', 'system', 'assistant', 'user'])
+	expect(prepared.request.messages[1]?.content).toContain('Conversation summary checkpoint')
+	expect(prepared.request.messages[1]?.content).toContain('Goal established and first reply delivered.')
+	expect(prepared.request.messages[3]?.content).toBe('Recent ask')
+	expect(prepared.request.messages.some(message => message.content === 'Initial goal')).toBeFalse()
+})
+
+test('reports usage chars from the effective compaction-aware prompt payload', () => {
+	const messages = [
+		createMessage('user', 'Initial goal '.repeat(40).trim()),
+		createMessage('assistant', 'Initial reply '.repeat(40).trim()),
+		createMessage('user', 'Recent ask')
+	]
+
+	const rawUsage = getPreparedInferenceUsageChars({
+		config: createResolvedConfig(),
+		conversation: createConversation(),
+		messages
+	})
+	const compactedUsage = getPreparedInferenceUsageChars({
+		compaction: {
+			compactedThroughMessageId: messages[1]!.id,
+			conversationId: 'conversation-1',
+			summary: 'Goal established and first reply delivered.',
+			updatedAt: '2026-04-15T00:00:00.000Z'
+		},
+		config: createResolvedConfig(),
+		conversation: createConversation(),
+		messages
+	})
+
+	expect(compactedUsage).toBeLessThan(rawUsage)
+})
+
 function createResolvedConfig(): ResolvedAppConfig {
 	return {
 		configFile: '/tmp/config.json',
 		defaultProvider: 'fireworks',
+		mcp: {
+			enabled: false,
+			endpoint: '',
+			pat: '',
+			patEnv: 'KESTRION_MCP_PAT',
+			patSource: 'missing'
+		},
 		matrixPromptError: null,
 		matrixPromptPath: '/tmp/MATRIX.md',
 		providers: {
@@ -91,6 +150,9 @@ function createResolvedConfig(): ResolvedAppConfig {
 				apiKeyEnv: 'FIREWORKS_API_KEY',
 				apiKeySource: 'config',
 				baseUrl: 'https://api.fireworks.ai/inference/v1',
+				compactAutoPromptChars: 4000,
+				compactAutoTurnThreshold: 8,
+				compactTailTurns: 4,
 				maxTokens: 1024,
 				model: 'accounts/fireworks/models/kimi-k2p5',
 				promptTruncateLength: 6000,

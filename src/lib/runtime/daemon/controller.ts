@@ -1,13 +1,21 @@
 /* eslint-disable import/max-dependencies, max-lines */
 
 import { randomUUID } from 'node:crypto'
-import { appendFileSync } from 'node:fs'
 
-import type { ResolvedAppConfig } from '../../config'
-import { loadWritableAppConfig } from '../../config'
+import { assertMatrixPromptConfigured, loadWritableAppConfig, type ResolvedAppConfig } from '../../config'
+import { buildInferenceRequest } from '../../inference/execution-profile'
+import { createInferenceAdapter } from '../../inference/registry'
+import { loadIntegrityStatus } from '../../integrity/state'
+import type { IntegrityStatus } from '../../integrity/types'
+import { callMcpTool as executeMcpToolCall, listMcpTools as loadMcpToolListing } from '../../mcp/client'
+import type { McpToolCallResult, McpToolListing } from '../../mcp/types'
 import type { AppPaths } from '../../paths'
+import type { DaemonLogger } from './logger'
+import { createNoopDaemonLogger } from './logger'
 import { isDraftConversationId, type AgentService } from '../../services/agent-service'
 import { loadMemorySnapshot } from '../../storage/memory-store'
+import { APP_TOOL_REGISTRY } from '../../tools/app-tool-registry'
+import { createDeniedToolAuditRecord } from '../../tools/audit'
 import {
 	authorizeToolCall,
 	DENY_ALL_TOOL_POLICY,
@@ -21,19 +29,18 @@ import {
 	isToolApprovalSuppressed,
 	mergeToolPolicies
 } from '../../tools/tool-approval'
-import type { ToolExecutionContext } from '../../tools/tool-types'
-import type { ToolApprovalPrompt, ToolApprovalResponse, WorkerTranscriptEntry } from '../../types'
-import type { TurnRunner } from '../worker/turn-runner'
+import type { RegisteredTool, ToolExecutionContext, ToolInvocationAuditRecord } from '../../tools/tool-types'
+import type { ToolQuestionAnswer, ToolQuestionPrompt } from '../../tools/tool-types'
+import { WORKSPACE_TOOL_REGISTRY } from '../../tools/workspace-tool-registry'
 import type {
-	WorkerHostToolRequest,
-	WorkerHostToolResponse,
-	WorkerHostMounts,
-	WorkerToolAuthorizationRequest,
-	WorkerToolAuthorizationResponse,
-	WorkerTurnCompletedEvent,
-	WorkerTurnEvent
-} from '../worker/types'
-import { executeDaemonHostedToolRequest } from './hosted-tools'
+	ConversationCompactionResult,
+	ToolApprovalPrompt,
+	ToolApprovalResponse,
+	WorkerTranscriptEntry
+} from '../../types'
+import type { TurnRunner } from '../worker/turn-runner'
+import type { WorkerExecutionEvent, WorkerHostMounts, WorkerTurnCompletedEvent, WorkerTurnEvent } from '../worker/types'
+import { appendMutationAuditRecord, appendToolInvocationAuditRecord } from './audit'
 
 type ConversationSummary = ReturnType<AgentService['listConversations']>[number]
 type ConversationThread = ReturnType<AgentService['createDraftConversation']>
@@ -59,6 +66,7 @@ export type DaemonBootstrapResult = {
 	config: ResolvedAppConfig
 	conversations: ConversationSummary[]
 	fireworksModels: ProviderModelRecord[]
+	integrity: IntegrityStatus
 	thread: ConversationThread
 	writableConfig: ReturnType<typeof loadWritableAppConfig>
 }
@@ -72,11 +80,30 @@ export class DaemonController {
 		private readonly service: AgentService,
 		private readonly paths: AppPaths,
 		private readonly runner: TurnRunner,
-		private config: ResolvedAppConfig
+		private config: ResolvedAppConfig,
+		private readonly logger: DaemonLogger = createNoopDaemonLogger()
 	) {}
 
 	addUserMessage(conversationId: string, content: string): Promise<ConversationThread> {
+		this.logger.info('conversation.user_message.add', { contentLength: content.length, conversationId })
 		return Promise.resolve(this.service.addUserMessage(conversationId, content))
+	}
+
+	callMcpTool(toolName: string, argumentsJson: string): Promise<McpToolCallResult> {
+		this.logger.info('mcp.tool.call', { toolName })
+		return executeMcpToolCall(this.config.mcp, toolName, argumentsJson)
+	}
+
+	compactConversation(conversationId: string): Promise<ConversationCompactionResult> {
+		this.logger.info('conversation.compact.forward', { conversationId })
+		return this.service.compactConversation(conversationId).then(result => {
+			this.logger.info('conversation.compact.result', {
+				compacted: result.compacted,
+				conversationId: result.conversationId,
+				reason: result.reason
+			})
+			return result
+		})
 	}
 
 	bootstrap(): Promise<DaemonBootstrapResult> {
@@ -85,6 +112,7 @@ export class DaemonController {
 			config: this.config,
 			conversations,
 			fireworksModels: this.service.listProviderModels('fireworks'),
+			integrity: loadIntegrityStatus(this.paths),
 			thread: this.service.getStartupThread(conversations),
 			writableConfig: loadWritableAppConfig(this.paths)
 		})
@@ -105,23 +133,38 @@ export class DaemonController {
 		onEvent: (event: WorkerTurnEvent) => void,
 		signal?: AbortSignal,
 		onToolApprovalPrompt?: (prompt: ToolApprovalPrompt) => Promise<ToolApprovalResponse>,
+		askQuestion?: (prompt: ToolQuestionPrompt) => Promise<ToolQuestionAnswer>,
 		onTranscriptEntry?: (entry: WorkerTranscriptEntry) => void
 	): Promise<ConversationThread> {
-		const thread = this.service.prepareConversationForReply(conversationId)
+		const preparedReply = await this.service.prepareConversationForReply(conversationId)
 		const turnId = randomUUID()
 		const runningToolCallMessageIds: string[] = []
+		this.logger.info('turn.started', {
+			compactionApplied: preparedReply.compaction !== null,
+			conversationId,
+			messageCount: preparedReply.thread.messages.length,
+			turnId
+		})
 		const completion = await this.runTurn(
 			conversationId,
 			onEvent,
 			onToolApprovalPrompt,
+			askQuestion,
 			onTranscriptEntry,
 			runningToolCallMessageIds,
 			signal,
-			thread,
+			preparedReply,
 			turnId
 		)
 
 		this.appendAssistantMessage(completion, conversationId)
+		this.logger.info('turn.completed', {
+			contentLength: completion.content.length,
+			conversationId,
+			model: completion.model,
+			provider: completion.provider,
+			turnId
+		})
 		return this.service.loadConversation(conversationId)
 	}
 
@@ -131,6 +174,11 @@ export class DaemonController {
 
 	listConversations(limit = 50): Promise<ConversationSummary[]> {
 		return Promise.resolve(this.service.listConversations(limit))
+	}
+
+	listMcpTools(): Promise<McpToolListing> {
+		this.logger.info('mcp.tools.list', { enabled: this.config.mcp.enabled })
+		return loadMcpToolListing(this.config.mcp)
 	}
 
 	listProviderModels(providerId: string): Promise<ProviderModelRecord[]> {
@@ -156,6 +204,13 @@ export class DaemonController {
 	updateConfig(config: ResolvedAppConfig): Promise<void> {
 		this.config = config
 		this.service.updateConfig(config)
+		this.logger.info('config.updated', {
+			compactAutoPromptChars: config.providers.fireworks.compactAutoPromptChars,
+			compactAutoTurnThreshold: config.providers.fireworks.compactAutoTurnThreshold,
+			compactTailTurns: config.providers.fireworks.compactTailTurns,
+			model: config.providers.fireworks.model,
+			providerMode: config.providers.fireworks.providerMode
+		})
 		return Promise.resolve()
 	}
 
@@ -169,93 +224,24 @@ export class DaemonController {
 		})
 	}
 
-	private writeAuditRecord(
+	private writeMutationAuditRecord(
 		conversationId: string,
 		turnId: string,
 		event: Extract<WorkerTurnEvent, { type: 'mutation' }>
 	): void {
-		const timestamp = new Date().toISOString()
-		const auditFile = `${this.paths.auditDir}/${timestamp.slice(0, 10)}.jsonl`
-		appendFileSync(auditFile, `${JSON.stringify({ conversationId, mutation: event.mutation, timestamp, turnId })}\n`)
+		appendMutationAuditRecord(
+			this.paths,
+			{ conversationId, timestamp: new Date().toISOString(), turnId },
+			event.mutation
+		)
 	}
 
-	private async handleWorkerHostToolRequest(
-		request: WorkerHostToolRequest,
-		hostMounts: WorkerHostMounts,
-		onToolApprovalPrompt?: (prompt: ToolApprovalPrompt) => Promise<ToolApprovalResponse>
-	): Promise<WorkerHostToolResponse> {
-		const authorization = authorizeToolCall(
-			request.toolName,
-			request.argumentsJson,
-			mergeToolPolicies(this.store.loadToolPolicy(), this.sessionToolPolicy),
-			hostMounts
-		)
-		if (!authorization.ok) {
-			if (!onToolApprovalPrompt) {
-				return { error: authorization.error, requestId: request.requestId, type: 'hostToolError' }
-			}
-
-			const fingerprint = buildToolApprovalFingerprint(request.toolName, request.argumentsJson)
-			if (isToolApprovalSuppressed(fingerprint, this.store.loadToolPolicy(), this.sessionPromptSuppressions)) {
-				return { error: authorization.error, requestId: request.requestId, type: 'hostToolError' }
-			}
-
-			const interactiveAuthorization = await this.resolveInteractiveToolApprovalContext(
-				hostMounts,
-				request.toolName,
-				request.argumentsJson,
-				authorization.error,
-				onToolApprovalPrompt,
-				fingerprint
-			)
-			if (!interactiveAuthorization.ok) {
-				return { error: interactiveAuthorization.error, requestId: request.requestId, type: 'hostToolError' }
-			}
-
-			return executeDaemonHostedToolRequest(
-				this.paths,
-				request,
-				toToolExecutionContext(interactiveAuthorization.context)
-			)
-		}
-
-		return executeDaemonHostedToolRequest(this.paths, request, toToolExecutionContext(authorization.context))
-	}
-
-	private handleWorkerToolAuthorizationRequest(
-		hostMounts: WorkerHostMounts,
-		request: WorkerToolAuthorizationRequest,
-		onToolApprovalPrompt?: (prompt: ToolApprovalPrompt) => Promise<ToolApprovalResponse>
-	): Promise<WorkerToolAuthorizationResponse> {
-		const resolvedPolicy = mergeToolPolicies(this.store.loadToolPolicy(), this.sessionToolPolicy)
-		const authorization = authorizeToolCall(request.toolName, request.argumentsJson, resolvedPolicy, hostMounts)
-		if (authorization.ok) {
-			return Promise.resolve({
-				context: authorization.context,
-				requestId: request.requestId,
-				type: 'toolAuthorizationAllow'
-			})
-		}
-
-		const fingerprint = buildToolApprovalFingerprint(request.toolName, request.argumentsJson)
-		if (
-			isToolApprovalSuppressed(fingerprint, resolvedPolicy, this.sessionPromptSuppressions) ||
-			!onToolApprovalPrompt
-		) {
-			return Promise.resolve({
-				error: authorization.error,
-				requestId: request.requestId,
-				type: 'toolAuthorizationDeny'
-			})
-		}
-
-		return this.resolveInteractiveWorkerToolAuthorization(
-			hostMounts,
-			request,
-			authorization.error,
-			onToolApprovalPrompt,
-			fingerprint
-		)
+	private writeToolInvocationAuditRecord(
+		conversationId: string,
+		turnId: string,
+		tool: ToolInvocationAuditRecord
+	): void {
+		appendToolInvocationAuditRecord(this.paths, { conversationId, timestamp: new Date().toISOString(), turnId }, tool)
 	}
 
 	private async resolveInteractiveToolApprovalContext(
@@ -305,26 +291,6 @@ export class DaemonController {
 		return { error: buildInteractiveDenialMessage(decision), ok: false }
 	}
 
-	private async resolveInteractiveWorkerToolAuthorization(
-		hostMounts: WorkerHostMounts,
-		request: WorkerToolAuthorizationRequest,
-		denialReason: string,
-		onToolApprovalPrompt: (prompt: ToolApprovalPrompt) => Promise<ToolApprovalResponse>,
-		fingerprint: string
-	): Promise<WorkerToolAuthorizationResponse> {
-		const interactiveAuthorization = await this.resolveInteractiveToolApprovalContext(
-			hostMounts,
-			request.toolName,
-			request.argumentsJson,
-			denialReason,
-			onToolApprovalPrompt,
-			fingerprint
-		)
-		return interactiveAuthorization.ok
-			? { context: interactiveAuthorization.context, requestId: request.requestId, type: 'toolAuthorizationAllow' }
-			: { error: interactiveAuthorization.error, requestId: request.requestId, type: 'toolAuthorizationDeny' }
-	}
-
 	private resolveGrantedAuthorizationContext(
 		hostMounts: WorkerHostMounts,
 		toolName: string,
@@ -357,8 +323,13 @@ export class DaemonController {
 		onEvent: (event: WorkerTurnEvent) => void,
 		event: WorkerTurnEvent
 	): void {
+		this.logger.debug('turn.event', summarizeWorkerTurnEvent(conversationId, turnId, event))
 		if (event.type === 'mutation') {
-			this.writeAuditRecord(conversationId, turnId, event)
+			this.writeMutationAuditRecord(conversationId, turnId, event)
+		}
+
+		if (event.type === 'toolAudit') {
+			this.writeToolInvocationAuditRecord(conversationId, turnId, event.audit)
 		}
 
 		if (event.type === 'toolCallsStart') {
@@ -376,43 +347,239 @@ export class DaemonController {
 		onEvent(event)
 	}
 
+	private async resolveToolAuthorization(
+		conversationId: string,
+		hostMounts: WorkerHostMounts,
+		toolName: string,
+		argumentsJson: string,
+		turnId: string,
+		onToolApprovalPrompt?: (prompt: ToolApprovalPrompt) => Promise<ToolApprovalResponse>
+	): Promise<{ context: ToolAuthorizationContext; ok: true } | { error: string; ok: false }> {
+		if (toolName === 'question') {
+			return { context: {}, ok: true }
+		}
+
+		const resolvedPolicy = mergeToolPolicies(this.store.loadToolPolicy(), this.sessionToolPolicy)
+		const authorization = authorizeToolCall(toolName, argumentsJson, resolvedPolicy, hostMounts)
+		if (authorization.ok) {
+			return { context: authorization.context, ok: true }
+		}
+
+		const fingerprint = buildToolApprovalFingerprint(toolName, argumentsJson)
+		if (
+			isToolApprovalSuppressed(fingerprint, resolvedPolicy, this.sessionPromptSuppressions) ||
+			!onToolApprovalPrompt
+		) {
+			this.writeToolInvocationAuditRecord(
+				conversationId,
+				turnId,
+				createDeniedToolAuditRecord(toolName, argumentsJson, authorization.error)
+			)
+			return { error: authorization.error, ok: false }
+		}
+
+		const interactiveAuthorization = await this.resolveInteractiveToolApprovalContext(
+			hostMounts,
+			toolName,
+			argumentsJson,
+			authorization.error,
+			onToolApprovalPrompt,
+			fingerprint
+		)
+		if (!interactiveAuthorization.ok) {
+			this.writeToolInvocationAuditRecord(
+				conversationId,
+				turnId,
+				createDeniedToolAuditRecord(toolName, argumentsJson, interactiveAuthorization.error)
+			)
+			return { error: interactiveAuthorization.error, ok: false }
+		}
+
+		return interactiveAuthorization
+	}
+
+	private createToolRegistry(
+		conversationId: string,
+		conversationModel: string,
+		conversationProvider: string,
+		hostMounts: WorkerHostMounts,
+		turnId: string,
+		onEvent: (event: WorkerTurnEvent) => void,
+		onToolApprovalPrompt: ((prompt: ToolApprovalPrompt) => Promise<ToolApprovalResponse>) | undefined,
+		askQuestion: ((prompt: ToolQuestionPrompt) => Promise<ToolQuestionAnswer>) | undefined,
+		workspaceToolExecutor: (
+			toolName: string,
+			argumentsJson: string,
+			context: ToolAuthorizationContext
+		) => Promise<string>
+	): RegisteredTool[] {
+		const workspaceToolNames = new Set(WORKSPACE_TOOL_REGISTRY.map(tool => tool.name))
+		return [...WORKSPACE_TOOL_REGISTRY, ...APP_TOOL_REGISTRY].map(tool => ({
+			...tool,
+			execute: async (argumentsJson, context) => {
+				const authorization = await this.resolveToolAuthorization(
+					conversationId,
+					hostMounts,
+					tool.name,
+					argumentsJson,
+					turnId,
+					onToolApprovalPrompt
+				)
+				if (!authorization.ok) {
+					throw new Error(authorization.error)
+				}
+
+				if (workspaceToolNames.has(tool.name)) {
+					return workspaceToolExecutor(tool.name, argumentsJson, authorization.context)
+				}
+
+				return tool.execute(argumentsJson, {
+					...mergeAuthorizedToolContext(context, authorization.context),
+					appPaths: this.paths,
+					askQuestion,
+					memoryOrigin: {
+						conversationId,
+						model: conversationModel,
+						provider: conversationProvider,
+						toolName: tool.name,
+						turnId
+					},
+					onAuditRecord: auditRecord => {
+						this.handleTurnEvent(conversationId, turnId, [], onEvent, { audit: auditRecord, type: 'toolAudit' })
+					}
+				})
+			},
+			metadata: tool.metadata
+		}))
+	}
+
 	private async runTurn(
 		conversationId: string,
 		onEvent: (event: WorkerTurnEvent) => void,
 		onToolApprovalPrompt: ((prompt: ToolApprovalPrompt) => Promise<ToolApprovalResponse>) | undefined,
+		askQuestion: ((prompt: ToolQuestionPrompt) => Promise<ToolQuestionAnswer>) | undefined,
 		onTranscriptEntry: ((entry: WorkerTranscriptEntry) => void) | undefined,
 		runningToolCallMessageIds: string[],
 		signal: AbortSignal | undefined,
-		thread: ConversationThread,
+		preparedReply: Awaited<ReturnType<AgentService['prepareConversationForReply']>>,
 		turnId: string
 	): Promise<WorkerTurnCompletedEvent> {
+		const thread = preparedReply.thread
 		const hostMounts = { agentRoot: this.paths.agentDir, configRoot: this.paths.configDir }
+		assertMatrixPromptConfigured(this.config)
+		const session = await this.runner.startSession(
+			{ conversation: thread.conversation, hostMounts, turnId },
+			signal,
+			entry => {
+				const savedEntry = this.store.appendWorkerTranscriptEntry(entry)
+				this.logger.debug('turn.transcript', {
+					conversationId,
+					direction: savedEntry.direction,
+					kind: savedEntry.kind,
+					sequence: savedEntry.sequence,
+					turnId
+				})
+				onTranscriptEntry?.(savedEntry)
+			},
+			(_event: WorkerExecutionEvent) => {}
+		)
+
 		try {
-			return await this.runner.runTurn(
-				{ config: this.config, conversation: thread.conversation, hostMounts, messages: thread.messages, turnId },
-				event => {
-					this.handleTurnEvent(conversationId, turnId, runningToolCallMessageIds, onEvent, event)
-				},
-				signal,
-				request => this.handleWorkerToolAuthorizationRequest(hostMounts, request, onToolApprovalPrompt),
-				request => this.handleWorkerHostToolRequest(request, hostMounts, onToolApprovalPrompt),
-				entry => {
-					const savedEntry = this.store.appendWorkerTranscriptEntry(entry)
-					onTranscriptEntry?.(savedEntry)
+			const toolRegistry = this.createToolRegistry(
+				conversationId,
+				thread.conversation.model,
+				thread.conversation.provider,
+				hostMounts,
+				turnId,
+				onEvent,
+				onToolApprovalPrompt,
+				askQuestion,
+				async (toolName, argumentsJson, authorization) => {
+					const response = await session.executeTool({
+						argumentsJson,
+						authorization,
+						requestId: randomUUID(),
+						toolName
+					})
+					for (const audit of response.audits) {
+						this.handleTurnEvent(conversationId, turnId, runningToolCallMessageIds, onEvent, {
+							audit,
+							type: 'toolAudit'
+						})
+					}
+					for (const mutation of response.mutations) {
+						this.handleTurnEvent(conversationId, turnId, runningToolCallMessageIds, onEvent, {
+							mutation,
+							type: 'mutation'
+						})
+					}
+					if (!response.ok) {
+						return JSON.stringify({ error: response.error ?? 'Worker tool execution failed.', ok: false })
+					}
+
+					return response.result ?? JSON.stringify({ ok: true })
 				}
 			)
+			const adapter = createInferenceAdapter(thread.conversation.provider, this.config, {
+				askQuestion,
+				onAuditRecord: audit => {
+					this.handleTurnEvent(conversationId, turnId, runningToolCallMessageIds, onEvent, { audit, type: 'toolAudit' })
+				},
+				onMutation: mutation => {
+					this.handleTurnEvent(conversationId, turnId, runningToolCallMessageIds, onEvent, {
+						mutation,
+						type: 'mutation'
+					})
+				},
+				toolRegistry,
+				workspaceRoot: this.paths.agentDir
+			})
+			const preparedRequest = buildInferenceRequest({
+				compaction: preparedReply.compaction,
+				config: this.config,
+				conversation: thread.conversation,
+				events: {
+					onTextDelta: delta => {
+						this.handleTurnEvent(conversationId, turnId, runningToolCallMessageIds, onEvent, {
+							delta,
+							type: 'textDelta'
+						})
+					},
+					onToolCallsFinish: toolCalls => {
+						this.handleTurnEvent(conversationId, turnId, runningToolCallMessageIds, onEvent, {
+							toolCalls,
+							type: 'toolCallsFinish'
+						})
+					},
+					onToolCallsStart: toolCalls => {
+						this.handleTurnEvent(conversationId, turnId, runningToolCallMessageIds, onEvent, {
+							toolCalls,
+							type: 'toolCallsStart'
+						})
+					}
+				},
+				messages: thread.messages,
+				signal
+			})
+			const result = await adapter.complete(preparedRequest.request)
+			return { content: result.content, model: result.model, provider: result.provider, type: 'completed' }
 		} finally {
+			await session.close()
 			this.finalizeRunningToolCallMessages(runningToolCallMessageIds)
 		}
 	}
 }
 
-function toToolExecutionContext(context: ToolAuthorizationContext): ToolExecutionContext {
+function toToolExecutionContext(
+	context: ToolAuthorizationContext,
+	onAuditRecord?: ToolExecutionContext['onAuditRecord']
+): ToolExecutionContext {
 	return {
 		allowedMemoryKinds: context.allowedMemoryKinds,
 		allowedSkillNames: context.allowedSkillNames,
 		fileAccessPolicy: context.fileAccessPolicy,
 		networkAccessPolicy: context.networkAccessPolicy,
+		onAuditRecord,
 		todoAllowed: context.todoAllowed
 	}
 }
@@ -423,4 +590,67 @@ function buildInteractiveDenialMessage(decision: ToolApprovalResponse): string {
 	}
 
 	return 'Tool call denied by the user.'
+}
+
+function summarizeWorkerTurnEvent(
+	conversationId: string,
+	turnId: string,
+	event: WorkerTurnEvent
+): Record<string, unknown> {
+	switch (event.type) {
+		case 'textDelta':
+			return {
+				conversationId,
+				deltaLength: event.delta.length,
+				deltaPreview: event.delta.slice(0, 80),
+				turnId,
+				type: event.type
+			}
+		case 'toolCallsStart':
+		case 'toolCallsFinish':
+			return {
+				conversationId,
+				toolCallCount: event.toolCalls.length,
+				toolNames: event.toolCalls.map(toolCall => toolCall.name),
+				turnId,
+				type: event.type
+			}
+		case 'toolAudit':
+			return {
+				conversationId,
+				toolName: event.audit.toolName,
+				turnId,
+				type: event.type
+			}
+		case 'mutation':
+			return {
+				conversationId,
+				mutationType: event.mutation.operation,
+				turnId,
+				type: event.type
+			}
+		case 'completed':
+			return {
+				contentLength: event.content.length,
+				conversationId,
+				model: event.model,
+				provider: event.provider,
+				turnId,
+				type: event.type
+			}
+	}
+}
+
+function mergeAuthorizedToolContext(
+	context: ToolExecutionContext,
+	authorization: ToolAuthorizationContext
+): ToolExecutionContext {
+	return {
+		...context,
+		allowedMemoryKinds: authorization.allowedMemoryKinds ?? context.allowedMemoryKinds,
+		allowedSkillNames: authorization.allowedSkillNames ?? context.allowedSkillNames,
+		fileAccessPolicy: authorization.fileAccessPolicy ?? context.fileAccessPolicy,
+		networkAccessPolicy: authorization.networkAccessPolicy ?? context.networkAccessPolicy,
+		todoAllowed: authorization.todoAllowed ?? context.todoAllowed
+	}
 }

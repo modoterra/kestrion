@@ -100,6 +100,7 @@ export class FireworksAdapter implements InferenceAdapter {
 		messages: FireworksRequestMessage[],
 		allowTools: boolean
 	): Promise<{ message: FireworksResponseMessage; payload: FireworksResponse; toolsEnabled: boolean }> {
+		const toolsEnabled = allowTools && request.toolMode !== 'disabled'
 		const requestInit = {
 			body: JSON.stringify({
 				max_tokens: request.maxTokens,
@@ -110,7 +111,9 @@ export class FireworksAdapter implements InferenceAdapter {
 				stream: false,
 				temperature: request.temperature,
 				...(request.topP !== undefined ? { top_p: request.topP } : {}),
-				...(allowTools ? { tool_choice: 'auto', tools: getToolDefinitions(this.toolContext.toolRegistry) } : {})
+				...(toolsEnabled
+					? { tool_choice: 'auto', tools: getToolDefinitions(this.toolContext.toolRegistry) }
+					: {})
 			}),
 			headers: { Authorization: `Bearer ${this.config.apiKey}`, 'Content-Type': 'application/json' },
 			method: 'POST',
@@ -123,7 +126,7 @@ export class FireworksAdapter implements InferenceAdapter {
 		const payload = (await response.json()) as FireworksResponse
 
 		if (response.ok) {
-			return { message: getFirstResponseMessage(payload), payload, toolsEnabled: allowTools }
+			return { message: getFirstResponseMessage(payload), payload, toolsEnabled }
 		}
 
 		const errorMessage = payload.error?.message ?? `Fireworks request failed with status ${response.status}.`
@@ -139,6 +142,7 @@ export class FireworksAdapter implements InferenceAdapter {
 		messages: FireworksRequestMessage[],
 		allowTools: boolean
 	): Promise<{ message: FireworksResponseMessage; payload: FireworksResponse; toolsEnabled: boolean }> {
+		const toolsEnabled = allowTools && request.toolMode !== 'disabled'
 		const requestInit = {
 			body: JSON.stringify({
 				max_tokens: request.maxTokens,
@@ -149,7 +153,9 @@ export class FireworksAdapter implements InferenceAdapter {
 				stream: true,
 				temperature: request.temperature,
 				...(request.topP !== undefined ? { top_p: request.topP } : {}),
-				...(allowTools ? { tool_choice: 'auto', tools: getToolDefinitions(this.toolContext.toolRegistry) } : {})
+				...(toolsEnabled
+					? { tool_choice: 'auto', tools: getToolDefinitions(this.toolContext.toolRegistry) }
+					: {})
 			}),
 			headers: { Authorization: `Bearer ${this.config.apiKey}`, 'Content-Type': 'application/json' },
 			method: 'POST',
@@ -181,7 +187,7 @@ export class FireworksAdapter implements InferenceAdapter {
 			model: streamedResponse.model ?? request.model
 		}
 
-		return { message, payload, toolsEnabled: allowTools }
+		return { message, payload, toolsEnabled }
 	}
 }
 

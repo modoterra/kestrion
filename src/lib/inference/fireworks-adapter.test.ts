@@ -154,6 +154,30 @@ test('retries without tools when the model rejects tool calling', async () => {
 	expect(result.content).toBe('Fallback without tools')
 })
 
+test('does not advertise tools when tool mode is disabled', async () => {
+	let requestBody = ''
+
+	globalThis.fetch = ((_, init) => {
+		requestBody = String(init?.body ?? '')
+		return Promise.resolve(createFireworksResponse('Compacted summary'))
+	}) as typeof fetch
+
+	const adapter = new FireworksAdapter(createFireworksConfig(), '/tmp/kestrion-config.json')
+	await adapter.complete({
+		maxTokens: 256,
+		messages: [{ content: 'Summarize this conversation.', role: 'user' }],
+		model: 'demo-model',
+		promptTruncateLength: 2048,
+		temperature: 0.2,
+		toolMode: 'disabled'
+	})
+
+	const parsedBody = JSON.parse(requestBody) as { tool_choice?: string; tools?: unknown[] }
+
+	expect(parsedBody.tool_choice).toBeUndefined()
+	expect(parsedBody.tools).toBeUndefined()
+})
+
 test('streams text deltas without collapsing whitespace', async () => {
 	const deltas: string[] = []
 	let requestBody = ''
@@ -230,6 +254,9 @@ function createFireworksConfig(): FireworksProviderConfig {
 		apiKeyEnv: 'FIREWORKS_API_KEY',
 		apiKeySource: 'env',
 		baseUrl: 'https://api.fireworks.ai/inference/v1',
+		compactAutoPromptChars: 4000,
+		compactAutoTurnThreshold: 8,
+		compactTailTurns: 4,
 		maxTokens: 1024,
 		model: 'demo-model',
 		promptTruncateLength: 4096,

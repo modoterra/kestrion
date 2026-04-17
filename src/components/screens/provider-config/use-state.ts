@@ -29,6 +29,12 @@ export type ProviderConfigState = {
 	activeProviderIndex: number
 	advanceWizardGroup: () => void
 	clearError: () => void
+	compactAutoPromptCharsIndex: number
+	compactAutoPromptCharsOptions: SelectOption[]
+	compactAutoTurnThresholdIndex: number
+	compactAutoTurnThresholdOptions: SelectOption[]
+	compactTailTurnsIndex: number
+	compactTailTurnsOptions: SelectOption[]
 	currentField: FocusField
 	currentStep: ReturnType<typeof getSteps>[number]
 	draft: ProviderDraft
@@ -182,6 +188,12 @@ function buildProviderConfigState(
 		activeProviderIndex: derived.activeProviderIndex,
 		advanceWizardGroup: actions.advanceWizardGroup,
 		clearError: actions.clearError,
+		compactAutoPromptCharsIndex: derived.compactAutoPromptCharsIndex,
+		compactAutoPromptCharsOptions: derived.compactAutoPromptCharsOptions,
+		compactAutoTurnThresholdIndex: derived.compactAutoTurnThresholdIndex,
+		compactAutoTurnThresholdOptions: derived.compactAutoTurnThresholdOptions,
+		compactTailTurnsIndex: derived.compactTailTurnsIndex,
+		compactTailTurnsOptions: derived.compactTailTurnsOptions,
 		currentField: derived.currentField,
 		currentStep: derived.currentStep,
 		draft: store.draft,

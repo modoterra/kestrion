@@ -14,7 +14,13 @@ type DevEnvironment = { env: NodeJS.ProcessEnv; paths: ReturnType<typeof resolve
 
 export async function runDev(): Promise<void> {
 	const environment = createDevEnvironment()
-	const daemon = spawnBunScript(resolveDaemonEntrypoint(appRoot), environment.env, ['ignore', 'inherit', 'inherit'])
+	const daemonArgs = process.argv.slice(2)
+	const daemon = spawnBunScript(
+		resolveDaemonEntrypoint(appRoot),
+		environment.env,
+		['ignore', 'inherit', 'inherit'],
+		daemonArgs
+	)
 	let cleanedUp = false
 	const onSigint = (): void => {
 		void exitFromSignal('SIGINT', 130)
@@ -50,8 +56,24 @@ export async function runDev(): Promise<void> {
 	}
 }
 
+export async function runDevCli(): Promise<void> {
+	const environment = createDevEnvironment()
+	process.exitCode = await runStandaloneTarget(resolveCliEntrypoint(appRoot), environment.env)
+}
+
+export async function runDevDaemon(): Promise<void> {
+	const environment = createDevEnvironment()
+	process.exitCode = await runStandaloneTarget(resolveDaemonEntrypoint(appRoot), environment.env, process.argv.slice(3))
+}
+
 if (import.meta.main) {
-	await runDev()
+	if (process.argv[2] === 'cli') {
+		await runDevCli()
+	} else if (process.argv[2] === 'daemon') {
+		await runDevDaemon()
+	} else {
+		await runDev()
+	}
 }
 
 export function createDevEnvironment(baseEnv: NodeJS.ProcessEnv = process.env): DevEnvironment {
@@ -95,6 +117,41 @@ function runCli(env: NodeJS.ProcessEnv): Promise<number> {
 	return waitForChildExit(cli)
 }
 
+async function runStandaloneTarget(scriptPath: string, env: NodeJS.ProcessEnv, args: string[] = []): Promise<number> {
+	const child = spawnBunScript(scriptPath, env, 'inherit', args)
+	let shuttingDown = false
+
+	const onSigint = (): void => {
+		void exitFromSignal('SIGINT', 130)
+	}
+	const onSigterm = (): void => {
+		void exitFromSignal('SIGTERM', 143)
+	}
+
+	registerSignalHandlers(onSigint, onSigterm)
+
+	try {
+		return await waitForChildExit(child)
+	} finally {
+		removeSignalHandlers(onSigint, onSigterm)
+		if (child.exitCode === null) {
+			await terminateChild(child, 'SIGTERM')
+		}
+	}
+
+	async function exitFromSignal(signal: 'SIGINT' | 'SIGTERM', exitCode: number): Promise<void> {
+		if (shuttingDown) {
+			return
+		}
+
+		shuttingDown = true
+		removeSignalHandlers(onSigint, onSigterm)
+		process.exitCode = exitCode
+		await terminateChild(child, signal)
+		process.kill(process.pid, signal)
+	}
+}
+
 function waitForDaemon(socketFile: string, daemonProcess: ChildProcess): Promise<void> {
 	return waitForDaemonAttempt(socketFile, daemonProcess, 100)
 }
@@ -116,9 +173,10 @@ function canConnectToSocket(socketFile: string): Promise<boolean> {
 function spawnBunScript(
 	scriptPath: string,
 	childEnv: NodeJS.ProcessEnv,
-	stdio: 'inherit' | ['ignore', 'inherit', 'inherit']
+	stdio: 'inherit' | ['ignore', 'inherit', 'inherit'],
+	args: string[] = []
 ): ChildProcess {
-	return spawn(process.execPath, [scriptPath], { cwd: appRoot, env: childEnv, stdio })
+	return spawn(process.execPath, [scriptPath, ...args], { cwd: appRoot, env: childEnv, stdio })
 }
 
 async function waitForDaemonAttempt(
@@ -153,4 +211,23 @@ function waitForChildExit(child: ChildProcess): Promise<number> {
 			resolve(code ?? (signal ? 1 : 0))
 		})
 	})
+}
+
+async function terminateChild(child: ChildProcess, signal: 'SIGINT' | 'SIGTERM'): Promise<void> {
+	if (child.exitCode !== null) {
+		return
+	}
+
+	child.kill(signal)
+	const killTimer = setTimeout(() => {
+		if (child.exitCode === null) {
+			child.kill('SIGKILL')
+		}
+	}, 1_000)
+
+	try {
+		await waitForChildExit(child)
+	} finally {
+		clearTimeout(killTimer)
+	}
 }

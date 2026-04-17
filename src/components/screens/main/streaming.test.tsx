@@ -80,6 +80,22 @@ test('shows a waiting turn rail before the first provider delta arrives', async 
 	expect(finalFrame).toContain('v done')
 })
 
+test('keeps context metrics visible after a completed reply without showing provider status copy', async () => {
+	mockFireworksScenarioResponses([createDelayedReplyScenario()])
+
+	await renderApp({ providerConfigured: true })
+	await submitPrompt('Finish the reply cleanly')
+
+	const finalFrame = await waitForFrameContent(renderedFrame => renderedFrame.includes('Finally here'), {
+		attempts: 48,
+		delayMs: 20
+	})
+
+	expect(finalFrame).toContain('ctx')
+	expect(finalFrame).toContain('v done')
+	expect(finalFrame).not.toContain('Fireworks AI replied.')
+})
+
 test('shows active tool usage while a streamed tool call is running', async () => {
 	process.env.KESTRION_TEST_TOOL_CALL_DELAY_MS = '250'
 	mockFireworksScenarioResponses(createToolActivityScenarios())

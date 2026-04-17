@@ -8,11 +8,18 @@ export type AppPaths = {
 	configDir: string
 	configFile: string
 	dataDir: string
+	daemonLogFile: string
 	databaseFile: string
+	denyFile: string
+	keysDir: string
 	legacyDataDir: string
+	localPrivateKeyFile: string
+	localPublicKeyFile: string
+	localKeysDir: string
 	runtimeDir: string
 	socketFile: string
 	skillsDir: string
+	trustedKeysDir: string
 }
 
 type ResolveAppPathsOptions = {
@@ -34,14 +41,20 @@ export function resolveAppPaths(options: ResolveAppPathsOptions = {}): AppPaths 
 	migrateLegacyDataDirectory(legacyDataDir, dataDir)
 	const agentDir = join(dataDir, 'agent')
 	const auditDir = join(dataDir, 'audit')
+	const keysDir = join(configDir, 'keys')
+	const localKeysDir = join(keysDir, 'local')
 	const skillsDir = join(dataDir, 'skills')
+	const trustedKeysDir = join(keysDir, 'trusted')
 
 	ensureDirectory(configDir)
 	ensureDirectory(dataDir)
 	ensureDirectory(agentDir)
 	ensureDirectory(auditDir)
+	ensureDirectory(keysDir)
+	ensureDirectory(localKeysDir)
 	ensureDirectory(runtimeDir)
 	ensureDirectory(skillsDir)
+	ensureDirectory(trustedKeysDir)
 
 	return {
 		agentDir,
@@ -50,11 +63,18 @@ export function resolveAppPaths(options: ResolveAppPathsOptions = {}): AppPaths 
 		configDir,
 		configFile: join(configDir, 'config.json'),
 		dataDir,
+		daemonLogFile: join(runtimeDir, `${appName}.daemon.log`),
 		databaseFile: join(dataDir, 'kestrion.sqlite'),
+		denyFile: join(configDir, 'deny'),
+		keysDir,
 		legacyDataDir,
+		localPrivateKeyFile: join(localKeysDir, 'memory-signing-private.pem'),
+		localPublicKeyFile: join(localKeysDir, 'memory-signing-public.pem'),
+		localKeysDir,
 		runtimeDir,
 		socketFile: join(runtimeDir, `${appName}.sock`),
-		skillsDir
+		skillsDir,
+		trustedKeysDir
 	}
 }
 

@@ -14,7 +14,15 @@ import type { ToolExecutionContext } from './tool-types'
 
 const DEFAULT_MAX_OUTPUT_CHARACTERS = 12_000
 const DEFAULT_TIMEOUT_MS = 15_000
-const MAX_TIMEOUT_MS = 60_000
+const MAX_PROCESS_OUTPUT_BYTES = 65_536
+const MAX_TIMEOUT_MS = 30_000
+const SANITIZED_SHELL_ENV = {
+	HOME: '/nonexistent',
+	LANG: 'C.UTF-8',
+	LC_ALL: 'C.UTF-8',
+	PATH: '/usr/bin:/bin',
+	TMPDIR: '/tmp'
+}
 
 export const BASH_TOOL_NAME = 'bash'
 
@@ -78,7 +86,9 @@ export function runBashCommand(input: unknown, options: ToolExecutionContext = {
 		const result = spawnSync('bash', ['-lc', argumentsValue.command], {
 			cwd,
 			encoding: 'utf8',
-			maxBuffer: 1_000_000,
+			env: SANITIZED_SHELL_ENV,
+			killSignal: 'SIGKILL',
+			maxBuffer: MAX_PROCESS_OUTPUT_BYTES,
 			timeout: timeoutMs
 		})
 		const maxOutputCharacters = argumentsValue.maxOutputCharacters ?? DEFAULT_MAX_OUTPUT_CHARACTERS

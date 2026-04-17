@@ -1,110 +1,152 @@
-import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { encodeFramedMessage, FramedMessageReader } from '../lib/runtime/ipc/framing'
+import { decodeWorkerEnvelope, encodeWorkerEnvelope, type WorkerWireEnvelope } from '../lib/runtime/ipc/worker-codec'
+import { createErroredToolAuditRecord, createToolInvocationAuditRecord } from '../lib/tools/audit'
+import type { ToolInvocationAuditRecord, ToolMutationRecord } from '../lib/tools/tool-types'
+import type { ToolExecutionContext } from '../lib/tools/tool-types'
+import { WORKSPACE_TOOL_REGISTRY } from '../lib/tools/workspace-tool-registry'
 
-import { runAgentTurn } from '../lib/runtime/worker/run-agent-turn'
-import type {
-	WorkerHostToolResponse,
-	WorkerStdoutMessage,
-	WorkerToolAuthorizationResponse,
-	WorkerTurnInput
-} from '../lib/runtime/worker/types'
-
-const inputJson = loadWorkerTurnInput()
-
-if (!inputJson.trim()) {
-	throw new Error('Worker turn input is required.')
-}
-
-const input = JSON.parse(inputJson) as WorkerTurnInput
-const hostBridge = createHostBridge()
-
-try {
-	await runAgentTurn(
-		input,
-		event => {
-			writeWorkerMessage({ event, type: 'event' })
-		},
-		undefined,
-		(toolName, argumentsJson) => hostBridge.authorize(toolName, argumentsJson),
-		(toolName, argumentsJson) => hostBridge.request(toolName, argumentsJson)
-	)
-} catch (error) {
-	process.stderr.write(`${getWorkerErrorMessage(error)}\n`)
-	process.exitCode = 1
-}
-
-function loadWorkerTurnInput(): string {
-	const inputFile = process.env.KESTRION_WORKER_TURN_INPUT_FILE?.trim()
-	return inputFile ? readFileSync(inputFile, 'utf8') : readFileSync(0, 'utf8')
-}
-
-function getWorkerErrorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : 'Unknown worker error.'
-}
-
-function writeWorkerMessage(message: WorkerStdoutMessage): void {
-	process.stdout.write(`${JSON.stringify(message)}\n`)
-}
-
-function createHostBridge(): {
-	authorize: NonNullable<Parameters<typeof runAgentTurn>[3]>
-	request: NonNullable<Parameters<typeof runAgentTurn>[4]>
-} {
-	const turnInputFile = process.env.KESTRION_WORKER_TURN_INPUT_FILE?.trim()
-	const hostResponseDirectory = turnInputFile ? join(dirname(turnInputFile), 'host-responses') : null
-
-	return {
-		authorize: async (toolName, argumentsJson) => {
-			if (!hostResponseDirectory) {
-				throw new Error('Worker host response directory is not configured.')
-			}
-
-			const requestId = randomUUID()
-			writeWorkerMessage({ argumentsJson, requestId, toolName, type: 'toolAuthorizationRequest' })
-			const response = await waitForHostResponse<WorkerToolAuthorizationResponse>(
-				join(hostResponseDirectory, `${requestId}.json`)
-			)
-
-			if (response.type === 'toolAuthorizationDeny') {
-				throw new Error(response.error)
-			}
-
-			return response.context
-		},
-		request: async (toolName, argumentsJson) => {
-			if (!hostResponseDirectory) {
-				throw new Error('Worker host response directory is not configured.')
-			}
-
-			const requestId = randomUUID()
-			writeWorkerMessage({ argumentsJson, requestId, toolName, type: 'hostToolRequest' })
-			const response = await waitForHostResponse<WorkerHostToolResponse>(
-				join(hostResponseDirectory, `${requestId}.json`)
-			)
-
-			if (response.type === 'hostToolError') {
-				throw new Error(response.error)
-			}
-
-			return response.result
-		}
+const workerState = {
+	bootstrap: null as null | {
+		conversationId: string
+		defaultReadRoot: string
+		readRoots: string[]
+		turnId: string
+		writeRoots: string[]
 	}
 }
 
-async function waitForHostResponse<TResponse extends WorkerHostToolResponse | WorkerToolAuthorizationResponse>(
-	responseFile: string
-): Promise<TResponse> {
-	if (existsSync(responseFile)) {
-		return JSON.parse(readFileSync(responseFile, 'utf8')) as TResponse
-	}
+const reader = new FramedMessageReader()
 
-	await waitForDelay(10)
-	return waitForHostResponse(responseFile)
-}
-
-function waitForDelay(delayMs: number): Promise<void> {
-	return new Promise(resolve => {
-		setTimeout(resolve, delayMs)
+process.stdin.on('data', chunk => {
+	reader.push(chunk as Buffer, payload => {
+		void handleEnvelope(decodeWorkerEnvelope(payload))
 	})
+})
+
+async function handleEnvelope(envelope: WorkerWireEnvelope): Promise<void> {
+	try {
+		switch (envelope.type) {
+			case 'sessionBootstrap':
+				workerState.bootstrap = envelope.payload
+				return
+			case 'executeToolRequest':
+				await executeToolRequest(envelope)
+				return
+			case 'shutdown':
+				process.exitCode = 0
+				process.stdin.pause()
+				return
+			case 'executeToolResponse':
+			case 'executionError':
+			case 'executionEvent':
+				throw new Error(`Worker received invalid inbound message "${envelope.type}".`)
+		}
+	} catch (error) {
+		writeEnvelope({
+			messageId: envelope.messageId,
+			payload: {
+				error: error instanceof Error ? error.message : 'Unknown worker error.',
+				requestId: envelope.type === 'executeToolRequest' ? envelope.payload.requestId : envelope.messageId
+			},
+			type: 'executionError'
+		})
+	}
+}
+
+async function executeToolRequest(
+	envelope: Extract<WorkerWireEnvelope, { type: 'executeToolRequest' }>
+): Promise<void> {
+	const bootstrap = workerState.bootstrap
+	if (!bootstrap) {
+		throw new Error('Worker session bootstrap has not been received.')
+	}
+
+	const tool = WORKSPACE_TOOL_REGISTRY.find(candidate => candidate.name === envelope.payload.toolName)
+	if (!tool) {
+		throw new Error(`Unknown worker tool "${envelope.payload.toolName}".`)
+	}
+
+	writeEnvelope({
+		messageId: `${envelope.messageId}:started`,
+		payload: { requestId: envelope.payload.requestId, toolName: envelope.payload.toolName, type: 'toolStarted' },
+		type: 'executionEvent'
+	})
+
+	const audits: ToolInvocationAuditRecord[] = []
+	const mutations: ToolMutationRecord[] = []
+	const startedAt = Date.now()
+
+	try {
+		const result = await tool.execute(envelope.payload.argumentsJson, {
+			allowedMemoryKinds: envelope.payload.authorization.allowedMemoryKinds,
+			allowedSkillNames: envelope.payload.authorization.allowedSkillNames,
+			fileAccessPolicy: envelope.payload.authorization.fileAccessPolicy ?? {
+				defaultReadRoot: bootstrap.defaultReadRoot,
+				readRoots: bootstrap.readRoots,
+				writeRoots: bootstrap.writeRoots
+			},
+			networkAccessPolicy: envelope.payload.authorization.networkAccessPolicy,
+			onAuditRecord: audit => {
+				audits.push(audit)
+			},
+			onMutation: mutation => {
+				mutations.push(mutation)
+			},
+			todoAllowed: envelope.payload.authorization.todoAllowed,
+			toolRegistry: WORKSPACE_TOOL_REGISTRY,
+			workspaceRoot: bootstrap.defaultReadRoot
+		})
+
+		writeEnvelope({
+			messageId: envelope.messageId,
+			payload: {
+				audits: [
+					...audits,
+					createToolInvocationAuditRecord(
+						envelope.payload.toolName,
+						envelope.payload.argumentsJson,
+						result,
+						Date.now() - startedAt
+					)
+				],
+				mutations,
+				ok: true,
+				requestId: envelope.payload.requestId,
+				result,
+				telemetry: { durationMs: Date.now() - startedAt }
+			},
+			type: 'executeToolResponse'
+		})
+	} catch (error) {
+		writeEnvelope({
+			messageId: envelope.messageId,
+			payload: {
+				audits: [
+					...audits,
+					createErroredToolAuditRecord(
+						envelope.payload.toolName,
+						envelope.payload.argumentsJson,
+						error instanceof Error ? error.message : 'Unknown worker tool error.',
+						Date.now() - startedAt
+					)
+				],
+				error: error instanceof Error ? error.message : 'Unknown worker tool error.',
+				mutations,
+				ok: false,
+				requestId: envelope.payload.requestId,
+				telemetry: { durationMs: Date.now() - startedAt }
+			},
+			type: 'executeToolResponse'
+		})
+	} finally {
+		writeEnvelope({
+			messageId: `${envelope.messageId}:completed`,
+			payload: { requestId: envelope.payload.requestId, toolName: envelope.payload.toolName, type: 'toolCompleted' },
+			type: 'executionEvent'
+		})
+	}
+}
+
+function writeEnvelope(envelope: WorkerWireEnvelope): void {
+	process.stdout.write(encodeFramedMessage(encodeWorkerEnvelope(envelope)))
 }

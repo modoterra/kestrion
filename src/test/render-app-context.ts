@@ -17,6 +17,8 @@ export function createRenderAppContext(
 		apiKeyConfigured?: boolean
 		configureToolPolicy?: (policy: ToolPolicy) => ToolPolicy
 		memory?: RenderAppMemory
+		mcpConfigured?: boolean
+		mcpEndpoint?: string
 		matrixConfigured?: boolean
 		providerConfigured?: boolean
 	}
@@ -44,7 +46,13 @@ export function createRenderAppContext(
 
 function createWritableConfig(
 	paths: ReturnType<typeof resolveAppPaths>,
-	options: { apiKeyConfigured?: boolean; matrixConfigured?: boolean; providerConfigured?: boolean }
+	options: {
+		apiKeyConfigured?: boolean
+		mcpConfigured?: boolean
+		mcpEndpoint?: string
+		matrixConfigured?: boolean
+		providerConfigured?: boolean
+	}
 ): ReturnType<typeof loadWritableAppConfig> {
 	if (options.matrixConfigured ?? true) {
 		writeMatrixPrompt(paths.configDir)
@@ -55,6 +63,11 @@ function createWritableConfig(
 
 	if (options.apiKeyConfigured ?? true) {
 		writableConfig.providers.fireworks.apiKey = 'test-api-key'
+	}
+	if (options.mcpConfigured ?? false) {
+		writableConfig.mcp.enabled = true
+		writableConfig.mcp.endpoint = options.mcpEndpoint ?? 'https://example.com/mcp'
+		writableConfig.mcp.pat = 'test-mcp-pat'
 	}
 
 	return writableConfig

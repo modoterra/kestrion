@@ -5,11 +5,15 @@ import type { AppPaths } from './paths'
 
 type ApiKeySource = 'config' | 'env' | 'missing'
 type ProviderMode = 'fireworks' | 'custom'
+type McpPatSource = 'config' | 'env' | 'missing'
 
 type FireworksProviderConfigFile = {
 	apiKey?: string
 	apiKeyEnv?: string
 	baseUrl?: string
+	compactAutoPromptChars?: number
+	compactAutoTurnThreshold?: number
+	compactTailTurns?: number
 	maxTokens?: number
 	model?: string
 	promptTruncateLength?: number
@@ -17,8 +21,16 @@ type FireworksProviderConfigFile = {
 	temperature?: number
 }
 
+type McpConfigFile = {
+	enabled?: boolean
+	endpoint?: string
+	pat?: string
+	patEnv?: string
+}
+
 type AppConfigFile = {
 	defaultProvider?: string
+	mcp?: McpConfigFile
 	providers?: { fireworks?: FireworksProviderConfigFile }
 	systemPrompt?: string
 }
@@ -27,6 +39,9 @@ export type WritableFireworksProviderConfig = {
 	apiKey: string
 	apiKeyEnv: string
 	baseUrl: string
+	compactAutoPromptChars: number
+	compactAutoTurnThreshold: number
+	compactTailTurns: number
 	maxTokens: number
 	model: string
 	promptTruncateLength: number
@@ -34,8 +49,16 @@ export type WritableFireworksProviderConfig = {
 	temperature: number
 }
 
+export type WritableMcpConfig = {
+	enabled: boolean
+	endpoint: string
+	pat: string
+	patEnv: string
+}
+
 export type WritableAppConfig = {
 	defaultProvider: 'fireworks'
+	mcp: WritableMcpConfig
 	providers: { fireworks: WritableFireworksProviderConfig }
 	systemPrompt: string
 }
@@ -45,6 +68,9 @@ export type FireworksProviderConfig = {
 	apiKeyEnv: string
 	apiKeySource: ApiKeySource
 	baseUrl: string
+	compactAutoPromptChars: number
+	compactAutoTurnThreshold: number
+	compactTailTurns: number
 	maxTokens: number
 	model: string
 	promptTruncateLength: number
@@ -52,9 +78,18 @@ export type FireworksProviderConfig = {
 	temperature: number
 }
 
+export type McpConfig = {
+	enabled: boolean
+	endpoint: string
+	pat: string
+	patEnv: string
+	patSource: McpPatSource
+}
+
 export type ResolvedAppConfig = {
 	configFile: string
 	defaultProvider: string
+	mcp: McpConfig
 	matrixPromptError: string | null
 	matrixPromptPath: string
 	providers: { fireworks: FireworksProviderConfig }
@@ -67,6 +102,9 @@ const DEFAULT_FIREWORKS_CONFIG: WritableFireworksProviderConfig = {
 	apiKey: '',
 	apiKeyEnv: 'FIREWORKS_API_KEY',
 	baseUrl: 'https://api.fireworks.ai/inference/v1',
+	compactAutoPromptChars: 4000,
+	compactAutoTurnThreshold: 8,
+	compactTailTurns: 4,
 	maxTokens: 1024,
 	model: 'accounts/fireworks/models/kimi-k2p5',
 	promptTruncateLength: 6000,
@@ -74,12 +112,21 @@ const DEFAULT_FIREWORKS_CONFIG: WritableFireworksProviderConfig = {
 	temperature: 0.6
 }
 
+const DEFAULT_MCP_CONFIG: WritableMcpConfig = {
+	enabled: false,
+	endpoint: '',
+	pat: '',
+	patEnv: 'KESTRION_MCP_PAT'
+}
+
 const DEFAULT_CONFIG: {
 	defaultProvider: 'fireworks'
+	mcp: WritableMcpConfig
 	providers: { fireworks: WritableFireworksProviderConfig }
 	systemPrompt: string
 } = {
 	defaultProvider: 'fireworks',
+	mcp: DEFAULT_MCP_CONFIG,
 	providers: { fireworks: DEFAULT_FIREWORKS_CONFIG },
 	systemPrompt: 'You are Kestrion, a terminal-first AI agent.'
 }
@@ -101,6 +148,7 @@ export function saveAppConfig(paths: AppPaths, config: WritableAppConfig): Resol
 export function getDefaultAppConfig(): WritableAppConfig {
 	return {
 		defaultProvider: DEFAULT_CONFIG.defaultProvider,
+		mcp: { ...DEFAULT_MCP_CONFIG },
 		providers: { fireworks: { ...DEFAULT_FIREWORKS_CONFIG } },
 		systemPrompt: DEFAULT_CONFIG.systemPrompt
 	}
@@ -113,6 +161,7 @@ function resolveAppConfig(configFile: string, rawConfig: WritableAppConfig): Res
 export function resolveRuntimeAppConfig(config: ResolvedAppConfig): ResolvedAppConfig {
 	return {
 		...config,
+		mcp: resolveMcpConfigWithEnv(config.mcp),
 		providers: { ...config.providers, fireworks: resolveFireworksConfigWithEnv(config.providers.fireworks) }
 	}
 }
@@ -143,11 +192,24 @@ function readOrCreateConfig(paths: AppPaths): WritableAppConfig {
 
 	return {
 		defaultProvider: parsed.defaultProvider === 'fireworks' ? parsed.defaultProvider : DEFAULT_CONFIG.defaultProvider,
+		mcp: {
+			enabled: parsed.mcp?.enabled === true,
+			endpoint: parsed.mcp?.endpoint ?? DEFAULT_MCP_CONFIG.endpoint,
+			pat: parsed.mcp?.pat ?? DEFAULT_MCP_CONFIG.pat,
+			patEnv: parsed.mcp?.patEnv ?? DEFAULT_MCP_CONFIG.patEnv
+		},
 		providers: {
 			fireworks: {
 				apiKey: parsed.providers?.fireworks?.apiKey ?? DEFAULT_FIREWORKS_CONFIG.apiKey,
 				apiKeyEnv: parsed.providers?.fireworks?.apiKeyEnv ?? DEFAULT_FIREWORKS_CONFIG.apiKeyEnv,
 				baseUrl: parsed.providers?.fireworks?.baseUrl ?? DEFAULT_FIREWORKS_CONFIG.baseUrl,
+				compactAutoPromptChars:
+					parsed.providers?.fireworks?.compactAutoPromptChars ?? DEFAULT_FIREWORKS_CONFIG.compactAutoPromptChars,
+				compactAutoTurnThreshold:
+					parsed.providers?.fireworks?.compactAutoTurnThreshold ??
+					DEFAULT_FIREWORKS_CONFIG.compactAutoTurnThreshold,
+				compactTailTurns:
+					parsed.providers?.fireworks?.compactTailTurns ?? DEFAULT_FIREWORKS_CONFIG.compactTailTurns,
 				maxTokens: parsed.providers?.fireworks?.maxTokens ?? DEFAULT_FIREWORKS_CONFIG.maxTokens,
 				model: parsed.providers?.fireworks?.model ?? DEFAULT_FIREWORKS_CONFIG.model,
 				promptTruncateLength:
@@ -187,6 +249,13 @@ function resolveAppConfigFromWritableConfig(configFile: string, rawConfig: Writa
 	return {
 		configFile,
 		defaultProvider,
+		mcp: resolveMcpConfigWithEnv({
+			enabled: rawConfig.mcp?.enabled === true,
+			endpoint: rawConfig.mcp?.endpoint?.trim() ?? DEFAULT_MCP_CONFIG.endpoint,
+			pat: rawConfig.mcp?.pat?.trim() ?? DEFAULT_MCP_CONFIG.pat,
+			patEnv: rawConfig.mcp?.patEnv ?? DEFAULT_MCP_CONFIG.patEnv,
+			patSource: 'missing'
+		}),
 		matrixPromptError: resolvedMatrixPrompt.error,
 		matrixPromptPath: resolvedMatrixPrompt.path,
 		providers: {
@@ -195,6 +264,11 @@ function resolveAppConfigFromWritableConfig(configFile: string, rawConfig: Writa
 				apiKeyEnv: fileConfig.apiKeyEnv ?? DEFAULT_FIREWORKS_CONFIG.apiKeyEnv,
 				apiKeySource: 'missing',
 				baseUrl: fileConfig.baseUrl ?? DEFAULT_FIREWORKS_CONFIG.baseUrl,
+				compactAutoPromptChars:
+					fileConfig.compactAutoPromptChars ?? DEFAULT_FIREWORKS_CONFIG.compactAutoPromptChars,
+				compactAutoTurnThreshold:
+					fileConfig.compactAutoTurnThreshold ?? DEFAULT_FIREWORKS_CONFIG.compactAutoTurnThreshold,
+				compactTailTurns: fileConfig.compactTailTurns ?? DEFAULT_FIREWORKS_CONFIG.compactTailTurns,
 				maxTokens: fileConfig.maxTokens ?? DEFAULT_FIREWORKS_CONFIG.maxTokens,
 				model: fileConfig.model ?? DEFAULT_FIREWORKS_CONFIG.model,
 				promptTruncateLength: fileConfig.promptTruncateLength ?? DEFAULT_FIREWORKS_CONFIG.promptTruncateLength,
@@ -214,6 +288,16 @@ function resolveFireworksConfigWithEnv(config: FireworksProviderConfig): Firewor
 	const apiKeySource: ApiKeySource = envApiKey ? 'env' : fileApiKey ? 'config' : 'missing'
 
 	return { ...config, apiKey, apiKeyEnv, apiKeySource }
+}
+
+function resolveMcpConfigWithEnv(config: McpConfig): McpConfig {
+	const patEnv = config.patEnv || DEFAULT_MCP_CONFIG.patEnv
+	const envPat = process.env[patEnv]?.trim() ?? ''
+	const filePat = config.pat?.trim() ?? ''
+	const pat = envPat || filePat
+	const patSource: McpPatSource = envPat ? 'env' : filePat ? 'config' : 'missing'
+
+	return { ...config, endpoint: config.endpoint?.trim() ?? '', pat, patEnv, patSource }
 }
 
 function resolveMatrixPrompt(configFile: string, baseSystemPrompt: string): ResolvedMatrixPrompt {

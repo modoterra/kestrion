@@ -15,6 +15,7 @@ export type MainScreenState = MainScreenMutableState & {
 	deferredMessages: ConversationThread['messages']
 	fireworksModel: string
 	inFlightRequest: MutableRefObject<AbortController | null>
+	mcpCloseStatusRef: MutableRefObject<string>
 	matrixCloseStatusRef: MutableRefObject<string>
 	missingMatrix: boolean
 	missingProvider: boolean
@@ -58,6 +59,7 @@ function useMainScreenRefs(): Pick<
 	MainScreenState,
 	| 'composerRef'
 	| 'inFlightRequest'
+	| 'mcpCloseStatusRef'
 	| 'matrixCloseStatusRef'
 	| 'pendingPaletteActionRef'
 	| 'providerCloseStatusRef'
@@ -67,6 +69,7 @@ function useMainScreenRefs(): Pick<
 	return {
 		composerRef: useRef<TextareaRenderable | null>(null),
 		inFlightRequest: useRef<AbortController | null>(null),
+		mcpCloseStatusRef: useRef('MCP setup closed.'),
 		matrixCloseStatusRef: useRef('MATRIX setup closed.'),
 		pendingPaletteActionRef: useRef<(() => void) | null>(null),
 		providerCloseStatusRef: useRef('Provider editor closed.'),
@@ -85,6 +88,7 @@ function useMainScreenValues(
 	MainScreenState,
 	| 'composerRef'
 	| 'inFlightRequest'
+	| 'mcpCloseStatusRef'
 	| 'matrixCloseStatusRef'
 	| 'pendingPaletteActionRef'
 	| 'providerCloseStatusRef'
@@ -115,6 +119,7 @@ function buildDerivedMainScreenValues(
 	MainScreenState,
 	| 'composerRef'
 	| 'inFlightRequest'
+	| 'mcpCloseStatusRef'
 	| 'matrixCloseStatusRef'
 	| 'pendingPaletteActionRef'
 	| 'providerCloseStatusRef'

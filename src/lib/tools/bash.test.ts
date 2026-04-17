@@ -28,6 +28,24 @@ test('runs a bash command in a workspace-relative directory', () => {
 	expect(result.stdout.trim()).toBe(join(workspaceRoot, 'src'))
 })
 
+test('runs bash commands with a scrubbed environment', () => {
+	const workspaceRoot = createTemporaryDirectory('kestrion-bash-env-')
+	process.env.KESTRION_BASH_TEST_SECRET = 'top-secret'
+
+	try {
+		const result = JSON.parse(
+			executeBashTool(JSON.stringify({ command: 'printf "%s" "${KESTRION_BASH_TEST_SECRET:-missing}"' }), {
+				workspaceRoot
+			})
+		) as { ok: boolean; stdout: string }
+
+		expect(result.ok).toBe(true)
+		expect(result.stdout).toBe('missing')
+	} finally {
+		delete process.env.KESTRION_BASH_TEST_SECRET
+	}
+})
+
 function createTemporaryDirectory(prefix: string): string {
 	const path = mkdtempSync(join(tmpdir(), prefix))
 	cleanupPaths.push(path)

@@ -6,7 +6,7 @@ import { useCallback, useRef, type ReactNode } from 'react'
 import { useMainScreenKeyboard } from '../../../lib/app/main-screen-keyboard'
 import type { AppProps } from '../../../lib/app/types'
 import { copySelectedText } from '../../../lib/clipboard'
-import { buildRuntimeSystemPrompt } from '../../../lib/inference/system-prompt'
+import { getPreparedInferenceUsageChars } from '../../../lib/inference/execution-profile'
 import { MainScreenLayout } from './layout'
 import { useMainScreenController, type MainScreenController } from './use-screen-controller'
 import { WorkerTranscriptProvider } from './worker-transcript-context'
@@ -16,8 +16,10 @@ export function MainScreen(props: AppProps): ReactNode {
 	const { width } = useTerminalDimensions()
 	const controller = useMainScreenController(props)
 	const contextUsageChars = getConversationContextUsage(
+		controller.activeThread.compaction,
+		controller.activeThread.conversation,
 		controller.deferredMessages,
-		controller.resolvedConfig.systemPrompt
+		controller.resolvedConfig
 	)
 	const handleMouseUp = useStableEvent((): void => {
 		void copySelectedText(renderer)
@@ -62,6 +64,7 @@ export function MainScreen(props: AppProps): ReactNode {
 				promptTruncateLength={controller.resolvedConfig.providers.fireworks.promptTruncateLength}
 				sessionTitle={controller.activeThread.conversation.title}
 				spinnerFrameIndex={controller.spinnerFrameIndex}
+				status={controller.status}
 				temperature={controller.resolvedConfig.providers.fireworks.temperature}
 				terminalWidth={width}
 				toolCallMessages={controller.toolCallMessages}
@@ -73,11 +76,18 @@ export function MainScreen(props: AppProps): ReactNode {
 	)
 }
 
-function getConversationContextUsage(messages: MainScreenController['deferredMessages'], systemPrompt: string): number {
-	return (
-		buildRuntimeSystemPrompt(systemPrompt).length +
-		messages.reduce((total, message) => total + message.content.length, 0)
-	)
+function getConversationContextUsage(
+	compaction: MainScreenController['activeThread']['compaction'],
+	conversation: MainScreenController['activeThread']['conversation'],
+	messages: MainScreenController['deferredMessages'],
+	config: MainScreenController['resolvedConfig']
+): number {
+	return getPreparedInferenceUsageChars({
+		compaction,
+		config,
+		conversation,
+		messages
+	})
 }
 
 function useStableEvent<TArgs extends unknown[]>(handler: (...args: TArgs) => void): (...args: TArgs) => void {

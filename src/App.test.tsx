@@ -255,7 +255,7 @@ test('moves between provider setup steps with arrow keys', async () => {
 
 	expect(getTestSetup().captureCharFrame()).toContain('Maximum Tokens')
 	expect(getTestSetup().captureCharFrame()).toContain('Prompt Truncation')
-	expect(getTestSetup().captureCharFrame()).toContain('Temperature')
+	expect(getTestSetup().captureCharFrame()).toContain('Compact Tail Turns')
 })
 
 test('opens the shortcuts view with Ctrl+G', async () => {
@@ -283,6 +283,25 @@ test('opens the command palette with Ctrl+K and filters commands', async () => {
 	})
 
 	expect(getTestSetup().captureCharFrame()).toContain('Provider settings')
+})
+
+test('opens MCP settings from the command palette', async () => {
+	await renderApp({ messages: [{ content: 'Hello there', role: 'user' }], providerConfigured: true })
+
+	await openCommandPalette()
+	await triggerUiUpdate(async () => {
+		await getTestSetup().mockInput.typeText('mcp')
+	})
+
+	await triggerUiUpdate(() => {
+		getTestSetup().mockInput.pressEnter()
+	})
+
+	const settingsFrame = await waitForFrameContent(renderedFrame => renderedFrame.includes('main / settings / mcp'))
+	expect(settingsFrame).toContain('settings / mcp')
+	expect(settingsFrame).toContain('Endpoint')
+	expect(settingsFrame).toContain('Saved PAT')
+	expect(settingsFrame).toContain('PAT Env')
 })
 
 test('opens the tools view from the command palette and shows tool details', async () => {
@@ -318,3 +337,128 @@ test('opens the tools view from the command palette and shows tool details', asy
 	expect(detailFrame).toContain('Parameters')
 	expect(detailFrame).toContain('Workspace-relative file path to read.')
 })
+
+test('shows MCP tools in the tools browser and can invoke a selected MCP tool', async () => {
+	globalThis.fetch = createAppTestMcpFetch()
+
+	await renderApp({
+		mcpConfigured: true,
+		messages: [{ content: 'Hello there', role: 'user' }],
+		providerConfigured: true
+	})
+
+	await openCommandPalette()
+	await triggerUiUpdate(async () => {
+		await getTestSetup().mockInput.typeText('tools')
+	})
+
+	await triggerUiUpdate(() => {
+		getTestSetup().mockInput.pressEnter()
+	})
+
+	const toolsFrame = await waitForFrameContent(renderedFrame => renderedFrame.includes('Echo Tool'))
+	expect(toolsFrame).toContain('Echo Tool')
+	expect(toolsFrame).toContain('mcp')
+
+	await openToolByQuery('echo')
+	const detailFrame = await waitForFrameContent(renderedFrame => renderedFrame.includes('Payload to echo'))
+	expect(detailFrame).toContain('Echo Tool')
+	expect(detailFrame).toContain('Payload to echo')
+
+	await triggerUiUpdate(() => {
+		getTestSetup().mockInput.pressKey('s', { ctrl: true })
+	})
+
+	const resultFrame = await waitForFrameContent(renderedFrame => renderedFrame.includes('"structuredContent"'))
+	expect(resultFrame).toContain('Latest response')
+	expect(resultFrame).toContain('"text": "echoed"')
+})
+
+function createAppTestMcpFetch(): typeof fetch {
+	return ((_input: URL | RequestInfo, init?: RequestInit | BunFetchRequestInit) => {
+		return respondToAppTestMcpMethod(JSON.parse(String(init?.body)) as { method: string })
+	}) as unknown as typeof fetch
+}
+
+async function openToolByQuery(query: string): Promise<void> {
+	await triggerUiUpdate(async () => {
+		await getTestSetup().mockInput.typeText(query)
+	})
+
+	await triggerUiUpdate(() => {
+		getTestSetup().mockInput.pressEnter()
+	})
+}
+
+function respondToAppTestMcpMethod(body: { method: string }): Response {
+	if (body.method === 'initialize') {
+		return createAppTestInitializeResponse()
+	}
+
+	if (body.method === 'notifications/initialized') {
+		return new Response('', { status: 202 })
+	}
+
+	if (body.method === 'tools/list') {
+		return createAppTestToolListResponse()
+	}
+
+	if (body.method === 'tools/call') {
+		return createAppTestToolCallResponse()
+	}
+
+	throw new Error(`Unexpected MCP method: ${body.method}`)
+}
+
+function createAppTestInitializeResponse(): Response {
+	return new Response(
+		JSON.stringify({
+			id: 1,
+			jsonrpc: '2.0',
+			result: {
+				protocolVersion: '2025-11-25',
+				serverInfo: { name: 'demo-server', title: 'Demo Server', version: '1.0.0' }
+			}
+		}),
+		{ headers: { 'Content-Type': 'application/json', 'MCP-Session-Id': 'session-app-test' }, status: 200 }
+	)
+}
+
+function createAppTestToolListResponse(): Response {
+	return new Response(
+		JSON.stringify({
+			id: 2,
+			jsonrpc: '2.0',
+			result: {
+				tools: [
+					{
+						description: 'Echoes a payload back to the caller.',
+						inputSchema: {
+							properties: { payload: { description: 'Payload to echo', type: 'string' } },
+							required: ['payload'],
+							type: 'object'
+						},
+						name: 'echo',
+						title: 'Echo Tool'
+					}
+				]
+			}
+		}),
+		{ headers: { 'Content-Type': 'application/json' }, status: 200 }
+	)
+}
+
+function createAppTestToolCallResponse(): Response {
+	return new Response(
+		JSON.stringify({
+			id: 2,
+			jsonrpc: '2.0',
+			result: {
+				content: [{ text: 'echoed', type: 'text' }],
+				isError: false,
+				structuredContent: { echoed: true }
+			}
+		}),
+		{ headers: { 'Content-Type': 'application/json' }, status: 200 }
+	)
+}

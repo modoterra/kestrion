@@ -9,6 +9,12 @@ import { FieldLabel, SectionExplanation, SectionTitle, SelectionSection, SoftInp
 
 export type ProviderConfigStepContentProps = {
 	activeProviderId: ProviderTabId
+	compactAutoPromptCharsIndex: number
+	compactAutoPromptCharsOptions: SelectOption[]
+	compactAutoTurnThresholdIndex: number
+	compactAutoTurnThresholdOptions: SelectOption[]
+	compactTailTurnsIndex: number
+	compactTailTurnsOptions: SelectOption[]
 	currentField: FocusField
 	currentStep: StepId
 	draft: ProviderDraft
@@ -20,6 +26,9 @@ export type ProviderConfigStepContentProps = {
 	onAdvance: () => void
 	onModelSearchChange: (value: string) => void
 	onProviderSearchChange: (value: string) => void
+	onSelectCompactAutoPromptChars: (value: string) => void
+	onSelectCompactAutoTurnThreshold: (value: string) => void
+	onSelectCompactTailTurns: (value: string) => void
 	onSelectMaxTokens: (value: string) => void
 	onSelectModel: (value: string) => void
 	onSelectPromptTruncateLength: (value: string) => void

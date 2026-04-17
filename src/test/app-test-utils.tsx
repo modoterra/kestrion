@@ -15,6 +15,8 @@ type RenderAppOptions = {
 	configureToolPolicy?: (policy: ToolPolicy) => ToolPolicy
 	height?: number
 	memory?: RenderAppMemory
+	mcpConfigured?: boolean
+	mcpEndpoint?: string
 	matrixConfigured?: boolean
 	messages?: Array<{ content: string; role: 'assistant' | 'user' }>
 	onExit?: () => void

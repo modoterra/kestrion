@@ -1,27 +1,21 @@
-import { desc, eq } from 'drizzle-orm'
-
-import { toolMemoryEntries, toolScratchMemory } from '../../db/schema'
+import { readTrustedScratchMemoryRecord, readTrustedStructuredMemoryRecords } from '../integrity/memory'
+import { loadIntegrityStatus } from '../integrity/state'
 import type { AppPaths } from '../paths'
-import { openAppDatabaseConnectionWithDrizzle } from './app-database'
 
 export type MemoryKind = 'episodic' | 'long-term' | 'scratch'
 export type StoredMemoryEntry = { content: string; createdAt: string; id: string; tags: string[]; title: string }
 export type MemorySnapshot = { episodic: StoredMemoryEntry[]; longTerm: StoredMemoryEntry[]; scratch: string }
 
-type MemoryDatabaseRow = { content: string; createdAt: string; id: string; tagsJson: string; title: string }
-type DatabaseLike = ReturnType<typeof openAppDatabaseConnectionWithDrizzle>['db']
-
 export function loadMemorySnapshot(paths: AppPaths): MemorySnapshot {
-	const connection = openAppDatabaseConnectionWithDrizzle(paths.databaseFile)
+	const integrityStatus = loadIntegrityStatus(paths)
+	if (integrityStatus.killSwitchActive) {
+		return { episodic: [], longTerm: [], scratch: '' }
+	}
 
-	try {
-		return {
-			episodic: readStructuredMemoryEntries(connection.db, 'episodic'),
-			longTerm: readStructuredMemoryEntries(connection.db, 'long-term'),
-			scratch: getScratchContent(connection.db)
-		}
-	} finally {
-		connection.client.close()
+	return {
+		episodic: readStructuredMemoryEntries(paths, 'episodic'),
+		longTerm: readStructuredMemoryEntries(paths, 'long-term'),
+		scratch: readTrustedScratchMemoryRecord(paths)?.content ?? ''
 	}
 }
 
@@ -36,31 +30,11 @@ export function getMemoryLabel(kind: MemoryKind): string {
 	}
 }
 
-function getScratchContent(database: DatabaseLike): string {
-	const row = database
-		.select({ content: toolScratchMemory.content })
-		.from(toolScratchMemory)
-		.where(eq(toolScratchMemory.id, 1))
-		.get()
-	return row?.content ?? ''
-}
-
 function readStructuredMemoryEntries(
-	database: DatabaseLike,
+	paths: AppPaths,
 	memory: Extract<MemoryKind, 'episodic' | 'long-term'>
 ): StoredMemoryEntry[] {
-	const rows = database
-		.select({
-			content: toolMemoryEntries.content,
-			createdAt: toolMemoryEntries.createdAt,
-			id: toolMemoryEntries.id,
-			tagsJson: toolMemoryEntries.tagsJson,
-			title: toolMemoryEntries.title
-		})
-		.from(toolMemoryEntries)
-		.where(eq(toolMemoryEntries.kind, memory))
-		.orderBy(desc(toolMemoryEntries.createdAt))
-		.all() as MemoryDatabaseRow[]
+	const rows = readTrustedStructuredMemoryRecords(paths, memory)
 
 	return rows.map(row => ({
 		content: row.content,

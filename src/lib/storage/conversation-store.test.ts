@@ -83,6 +83,44 @@ test('persists tool call transcript rows alongside the conversation thread', () 
 	])
 })
 
+test('persists and replaces conversation compaction checkpoints', () => {
+	const tempDir = mkdtempSync(join(tmpdir(), 'kestrion-store-'))
+	cleanupPaths.push(tempDir)
+
+	const store = new ConversationStore(join(tempDir, 'kestrion.sqlite'))
+	const thread = store.createConversation({ model: 'demo-model', provider: 'fireworks', title: 'Compaction session' })
+	store.appendMessage({ content: 'Turn 1', conversationId: thread.conversation.id, role: 'user' })
+	const assistantMessage = store.appendMessage({
+		content: 'Reply 1',
+		conversationId: thread.conversation.id,
+		model: 'demo-model',
+		provider: 'fireworks',
+		role: 'assistant'
+	})
+
+	store.saveConversationCompaction({
+		compactedThroughMessageId: assistantMessage.id,
+		conversationId: thread.conversation.id,
+		summary: 'First checkpoint'
+	})
+	store.saveConversationCompaction({
+		compactedThroughMessageId: assistantMessage.id,
+		conversationId: thread.conversation.id,
+		summary: 'Updated checkpoint'
+	})
+
+	const storedCompaction = store.getConversationCompaction(thread.conversation.id)
+	store.close()
+
+	expect(storedCompaction).toEqual(
+		expect.objectContaining({
+			compactedThroughMessageId: assistantMessage.id,
+			conversationId: thread.conversation.id,
+			summary: 'Updated checkpoint'
+		})
+	)
+})
+
 test('persists worker transcript entries in stable turn and sequence order', () => {
 	const tempDir = mkdtempSync(join(tmpdir(), 'kestrion-store-'))
 	cleanupPaths.push(tempDir)
@@ -160,6 +198,7 @@ test('migrates the shared database with tool storage tables', () => {
 			`SELECT name
 			FROM sqlite_master
 			WHERE type = 'table' AND name IN (
+				'conversation_compaction',
 				'conversation_tool_calls',
 				'conversation_worker_transcript',
 				'tool_policy',
@@ -173,10 +212,11 @@ test('migrates the shared database with tool storage tables', () => {
 		.all() as Array<{ name: string }>
 	database.close()
 
-	expect(version).toBe(5)
-	expect(drizzleMigrationCount.count).toBe(4)
+	expect(version).toBe(6)
+	expect(drizzleMigrationCount.count).toBe(6)
 	expect(tableNames.map(table => table.name)).toEqual([
 		'__drizzle_migrations',
+		'conversation_compaction',
 		'conversation_tool_calls',
 		'conversation_worker_transcript',
 		'tool_memory_entries',

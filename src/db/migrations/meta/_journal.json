@@ -11,6 +11,14 @@
 			"tag": "0002_conversation_worker_transcript",
 			"breakpoints": true
 		},
-		{ "idx": 3, "version": "6", "when": 1776301200000, "tag": "0003_tool_policy", "breakpoints": true }
+		{ "idx": 3, "version": "6", "when": 1776301200000, "tag": "0003_tool_policy", "breakpoints": true },
+		{ "idx": 4, "version": "7", "when": 1776312000000, "tag": "0004_phase5_integrity", "breakpoints": true },
+		{
+			"idx": 5,
+			"version": "7",
+			"when": 1776398400000,
+			"tag": "0005_conversation_compaction",
+			"breakpoints": true
+		}
 	]
 }

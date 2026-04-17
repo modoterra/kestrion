@@ -10,6 +10,7 @@ const cleanupPaths: string[] = []
 
 afterEach(() => {
 	delete process.env.FIREWORKS_API_KEY
+	delete process.env.KESTRION_MCP_PAT
 
 	for (const path of cleanupPaths.splice(0)) {
 		rmSync(path, { force: true, recursive: true })
@@ -57,10 +58,18 @@ test('creates a default config file and honors env overrides', () => {
 
 test('resolveRuntimeAppConfig rehydrates env-backed API keys for worker processes', () => {
 	process.env.FIREWORKS_API_KEY = 'env-secret'
+	process.env.KESTRION_MCP_PAT = 'env-mcp-pat'
 
 	const config = resolveRuntimeAppConfig({
 		configFile: '/tmp/config.json',
 		defaultProvider: 'fireworks',
+		mcp: {
+			enabled: true,
+			endpoint: 'https://example.com/mcp',
+			pat: '',
+			patEnv: 'KESTRION_MCP_PAT',
+			patSource: 'missing'
+		},
 		matrixPromptError: null,
 		matrixPromptPath: '/tmp/MATRIX.md',
 		providers: {
@@ -69,6 +78,9 @@ test('resolveRuntimeAppConfig rehydrates env-backed API keys for worker processe
 				apiKeyEnv: 'FIREWORKS_API_KEY',
 				apiKeySource: 'missing',
 				baseUrl: 'https://api.fireworks.ai/inference/v1',
+				compactAutoPromptChars: 4000,
+				compactAutoTurnThreshold: 8,
+				compactTailTurns: 4,
 				maxTokens: 1024,
 				model: 'accounts/fireworks/models/kimi-k2p5',
 				promptTruncateLength: 6000,
@@ -81,6 +93,8 @@ test('resolveRuntimeAppConfig rehydrates env-backed API keys for worker processe
 
 	expect(config.providers.fireworks.apiKey).toBe('env-secret')
 	expect(config.providers.fireworks.apiKeySource).toBe('env')
+	expect(config.mcp.pat).toBe('env-mcp-pat')
+	expect(config.mcp.patSource).toBe('env')
 	expect(config.matrixPromptError).toBeNull()
 	expect(config.matrixPromptPath).toBe('/tmp/MATRIX.md')
 })

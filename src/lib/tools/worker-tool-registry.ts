@@ -1,4 +1,6 @@
 import type { WorkerHostedToolName } from '../runtime/worker/types'
+import { createErroredToolAuditRecord, createToolInvocationAuditRecord } from './audit'
+import { FETCH_TOOL_NAME } from './fetch'
 import type { ToolAuthorizationContext } from './policy'
 import { QUESTION_TOOL_NAME } from './question'
 import { TOOL_REGISTRY } from './registry'
@@ -8,7 +10,12 @@ import { TODO_TOOL_NAME } from './todo'
 import type { RegisteredTool, ToolExecutor } from './tool-types'
 
 const SANDBOX_SCOPE = 'sandbox'
-const HOST_MANAGED_TOOL_NAMES = new Set<WorkerHostedToolName>([REMEMBER_TOOL_NAME, SKILL_TOOL_NAME, TODO_TOOL_NAME])
+const HOST_MANAGED_TOOL_NAMES = new Set<WorkerHostedToolName>([
+	FETCH_TOOL_NAME,
+	REMEMBER_TOOL_NAME,
+	SKILL_TOOL_NAME,
+	TODO_TOOL_NAME
+])
 const DETERMINISTIC_DENIAL_MESSAGES = new Map<string, string>([
 	[QUESTION_TOOL_NAME, 'Tool "question" is not yet available through the sandbox worker protocol.']
 ])
@@ -24,9 +31,9 @@ const WORKER_TOOL_RESTRICTIONS: Record<string, string[]> = {
 		'Rejects ambiguous matches unless replaceAll is true.'
 	],
 	fetch: [
-		'Fetches absolute http:// or https:// URLs from inside the worker sandbox.',
-		'Returns text responses only.',
-		'Truncates output to 20,000 characters by default.'
+		'Executed by the daemon through the fetch gateway, not by the worker directly.',
+		'Rejects blocked addresses, oversized responses, and non-text MIME types.',
+		'Returns text responses only.'
 	],
 	glob: [
 		'Matches file paths under /agent only.',
@@ -69,7 +76,8 @@ const WORKER_TOOL_RESTRICTIONS: Record<string, string[]> = {
 	],
 	skill: [
 		'Executed by the daemon, not by the worker directly.',
-		'Loads skills from app storage outside the sandbox.',
+		'Loads instruction files from app storage outside the sandbox.',
+		'Skills are read through the skill tool and are not executed as plugins.',
 		'Rejects paths outside the chosen skill directory.'
 	],
 	todo: [
@@ -132,10 +140,21 @@ function resolveWorkerToolExecutor(
 	}
 
 	return async (argumentsJson, context) => {
+		const startedAt = Date.now()
 		try {
 			const authorization = await authorizeToolCall(tool.name, argumentsJson)
-			return await tool.execute(argumentsJson, mergeAuthorizedToolContext(context, authorization))
+			const result = await tool.execute(argumentsJson, mergeAuthorizedToolContext(context, authorization))
+			context.onAuditRecord?.(createToolInvocationAuditRecord(tool.name, argumentsJson, result, Date.now() - startedAt))
+			return result
 		} catch (error) {
+			context.onAuditRecord?.(
+				createErroredToolAuditRecord(
+					tool.name,
+					argumentsJson,
+					error instanceof Error ? error.message : 'Unknown tool authorization error.',
+					Date.now() - startedAt
+				)
+			)
 			return createDeterministicDenial(error instanceof Error ? error.message : 'Unknown tool authorization error.')
 		}
 	}

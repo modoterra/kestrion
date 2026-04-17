@@ -12,12 +12,18 @@ export type ToolApprovalPrompt = {
 export type ToolApprovalResponse = { explanation?: string; mode: ToolApprovalDecisionMode }
 export type WorkerTranscriptDirection = 'daemonToWorker' | 'workerToDaemon'
 export type WorkerTranscriptKind =
+	| 'executionError'
+	| 'executionEvent'
+	| 'executeToolRequest'
+	| 'executeToolResponse'
 	| 'toolAuthorizationAllow'
 	| 'toolAuthorizationDeny'
 	| 'toolAuthorizationRequest'
 	| 'hostToolError'
 	| 'hostToolRequest'
 	| 'hostToolResponse'
+	| 'sessionBootstrap'
+	| 'shutdown'
 	| 'turnInput'
 	| 'workerEvent'
 export type ToolCallMessageRecord = {
@@ -49,6 +55,19 @@ export type ConversationRecord = {
 
 export type ConversationSummary = ConversationRecord & { messageCount: number; preview: string | null }
 
+export type ConversationCompactionRecord = {
+	compactedThroughMessageId: string
+	conversationId: string
+	summary: string
+	updatedAt: string
+}
+
+export type ConversationCompactionResult = {
+	compacted: boolean
+	conversationId: string
+	reason: 'draft' | 'no-op' | 'updated'
+}
+
 export type MessageRecord = {
 	content: string
 	conversationId: string
@@ -60,6 +79,7 @@ export type MessageRecord = {
 }
 
 export type ConversationThread = {
+	compaction: ConversationCompactionRecord | null
 	conversation: ConversationRecord
 	messages: MessageRecord[]
 	toolCallMessages: ToolCallMessageRecord[]
@@ -84,6 +104,7 @@ export type InferenceRequest = {
 	reasoningEffort?: string
 	signal?: AbortSignal
 	temperature: number
+	toolMode?: 'disabled' | 'enabled'
 	topP?: number
 }
 

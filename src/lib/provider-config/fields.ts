@@ -11,6 +11,9 @@ export type ProviderDraft = {
 	apiKey: string
 	apiKeyEnv: string
 	baseUrl: string
+	compactAutoPromptChars: string
+	compactAutoTurnThreshold: string
+	compactTailTurns: string
 	maxTokens: string
 	model: string
 	promptTruncateLength: string
@@ -30,6 +33,24 @@ export const PROMPT_TRUNCATE_PRESETS = [
 	{ description: 'Balanced default', label: '6000 chars', value: '6000' },
 	{ description: 'Longer conversation history', label: '8000 chars', value: '8000' },
 	{ description: 'Maximum preserved context', label: '12000 chars', value: '12000' }
+] as const
+
+export const COMPACT_TAIL_TURN_PRESETS = [
+	{ description: 'Aggressive compaction with a small raw tail', label: '2 turns', value: '2' },
+	{ description: 'Balanced default', label: '4 turns', value: '4' },
+	{ description: 'Keep more recent turns verbatim', label: '8 turns', value: '8' }
+] as const
+
+export const COMPACT_AUTO_TURN_THRESHOLD_PRESETS = [
+	{ description: 'Compact sooner based on turn count', label: '6 turns', value: '6' },
+	{ description: 'Balanced default', label: '8 turns', value: '8' },
+	{ description: 'Wait longer before auto compaction', label: '12 turns', value: '12' }
+] as const
+
+export const COMPACT_AUTO_PROMPT_CHAR_PRESETS = [
+	{ description: 'Compact sooner as raw context grows', label: '2000 chars', value: '2000' },
+	{ description: 'Balanced default', label: '4000 chars', value: '4000' },
+	{ description: 'Allow a longer raw suffix', label: '6000 chars', value: '6000' }
 ] as const
 
 export const TEMPERATURE_PRESETS = [

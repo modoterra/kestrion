@@ -8,8 +8,14 @@ import {
 	triggerUiUpdate,
 	waitForFrameContent
 } from '../../../test/app-test-utils'
+import {
+	clearMockFireworksScenarioResponses,
+	mockFireworksScenarioResponses,
+	readMockFireworksScenarioRequests
+} from '../../../test/mock-fireworks-scenarios'
 
 afterEach(async () => {
+	clearMockFireworksScenarioResponses()
 	await cleanupRenderedApp()
 })
 
@@ -234,6 +240,57 @@ test('shows an overwrite warning when previewing an existing MATRIX.md', async (
 	expect(previewFrame).toContain('Existing MATRIX.md will be replaced at')
 	expect(previewFrame).toContain('# MATRIX')
 	expect(previewFrame).toContain('## Role')
+})
+
+test('runs compact conversation from the command palette', async () => {
+	mockFireworksScenarioResponses([
+		{
+			body: {
+				choices: [{ message: { content: 'Checkpoint summary from the command palette.' } }],
+				id: 'chatcmpl_ui_compaction',
+				model: 'accounts/fireworks/models/kimi-k2p5'
+			},
+			kind: 'json'
+		}
+	])
+
+	await renderApp({
+		providerConfigured: true,
+		savedConversations: [
+			{
+				messages: [
+					{ content: 'Turn 1 request', role: 'user' },
+					{ content: 'Turn 1 reply', role: 'assistant' },
+					{ content: 'Turn 2 request', role: 'user' },
+					{ content: 'Turn 2 reply', role: 'assistant' },
+					{ content: 'Turn 3 request', role: 'user' },
+					{ content: 'Turn 3 reply', role: 'assistant' },
+					{ content: 'Turn 4 request', role: 'user' },
+					{ content: 'Turn 4 reply', role: 'assistant' },
+					{ content: 'Turn 5 request', role: 'user' },
+					{ content: 'Turn 5 reply', role: 'assistant' }
+				]
+			}
+		]
+	})
+
+	const paletteFrame = await openCommandPalette()
+	expect(paletteFrame).toContain('Compact conversation')
+
+	await triggerUiUpdate(async () => {
+		await getTestSetup().mockInput.typeText('compact')
+	})
+
+	await triggerUiUpdate(() => {
+		getTestSetup().mockInput.pressEnter()
+	})
+
+	const compactedFrame = await waitForFrameContent(renderedFrame =>
+		renderedFrame.includes('Conversation compacted for future replies.')
+	)
+	expect(compactedFrame).toContain('Conversation compacted for future replies.')
+	expect(compactedFrame).toContain('ctx')
+	expect(readMockFireworksScenarioRequests()).toHaveLength(1)
 })
 
 async function openMatrixSetupWizard(): Promise<string> {

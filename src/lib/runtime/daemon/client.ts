@@ -4,9 +4,12 @@ import { randomUUID } from 'node:crypto'
 import type { Socket } from 'node:net'
 
 import type { ResolvedAppConfig } from '../../config'
+import type { McpToolCallResult, McpToolListing } from '../../mcp/types'
 import type { AppPaths } from '../../paths'
 import type { AppService } from '../../services/app-service'
+import type { ToolQuestionAnswer, ToolQuestionPrompt } from '../../tools/tool-types'
 import type {
+	ConversationCompactionResult,
 	ConversationSummary,
 	ConversationThread,
 	InferenceEvents,
@@ -15,12 +18,17 @@ import type {
 	ToolApprovalResponse,
 	WorkerTranscriptEntry
 } from '../../types'
+import { decodeDaemonResponse, encodeDaemonRequest } from '../ipc/daemon-codec'
+import { FramedMessageReader, writeFramedMessage } from '../ipc/framing'
 import type { WorkerTurnEvent } from '../worker/types'
 import { connectSocket, requestDaemon } from './client-transport'
 import type { DaemonBootstrapResult, DaemonRequest, DaemonResponse, DaemonResponseResult } from './protocol'
 
+type AskQuestionFn = NonNullable<NonNullable<Parameters<AppService['generateAssistantReply']>[3]>['askQuestion']>
+
 type PendingRequest = {
 	events?: InferenceEvents
+	question?: AskQuestionFn
 	reject: (error: unknown) => void
 	resolve: (value: DaemonResponseResult) => void
 }
@@ -48,13 +56,19 @@ export class DaemonClient implements AppService {
 		endpoint?: { host?: string; port: number }
 	): Promise<{ bootstrap: DaemonBootstrapResult; client: DaemonClient }> {
 		const socket = await connectSocket(paths.socketFile, endpoint)
-		const bootstrap = (await requestDaemon<DaemonBootstrapResult>(socket, {
-			id: randomUUID(),
-			type: 'bootstrap'
-		})) as DaemonBootstrapResult
-		const client = new DaemonClient(socket, bootstrap)
-		client.startListening()
-		return { bootstrap, client }
+		try {
+			const bootstrap = (await requestDaemon<DaemonBootstrapResult>(socket, {
+				id: randomUUID(),
+				type: 'bootstrap'
+			})) as DaemonBootstrapResult
+			const client = new DaemonClient(socket, bootstrap)
+			client.startListening()
+			return { bootstrap, client }
+		} catch (error) {
+			socket.end()
+			socket.destroy()
+			throw error
+		}
 	}
 
 	addUserMessage(conversationId: string, content: string): Promise<ConversationThread> {
@@ -66,9 +80,18 @@ export class DaemonClient implements AppService {
 		)
 	}
 
+	callMcpTool(toolName: string, argumentsJson: string): Promise<McpToolCallResult> {
+		return this.request<McpToolCallResult>({ argumentsJson, id: randomUUID(), toolName, type: 'callMcpTool' })
+	}
+
+	compactConversation(conversationId: string): Promise<ConversationCompactionResult> {
+		return this.request<ConversationCompactionResult>({ conversationId, id: randomUUID(), type: 'compactConversation' })
+	}
+
 	createDraftConversation(): ConversationThread {
 		const now = new Date().toISOString()
 		return {
+			compaction: null,
 			conversation: {
 				createdAt: now,
 				id: 'draft',
@@ -101,12 +124,13 @@ export class DaemonClient implements AppService {
 		conversationId: string,
 		signal?: AbortSignal,
 		events?: InferenceEvents,
-		_toolContext?: Parameters<AppService['generateAssistantReply']>[3]
+		toolContext?: Parameters<AppService['generateAssistantReply']>[3]
 	): Promise<ConversationThread> {
 		const requestId = randomUUID()
 		const promise = this.request<ConversationThread>(
 			{ conversationId, id: requestId, type: 'generateAssistantReply' },
-			events
+			events,
+			toolContext?.askQuestion
 		).then(thread => {
 			this.threadCache.set(thread.conversation.id, thread)
 			return this.refreshConversations().then(() => thread)
@@ -139,6 +163,10 @@ export class DaemonClient implements AppService {
 
 	listConversations(): Promise<ConversationSummary[]> {
 		return Promise.resolve(this.conversations)
+	}
+
+	listMcpTools(): Promise<McpToolListing> {
+		return this.request<McpToolListing>({ id: randomUUID(), type: 'listMcpTools' })
 	}
 
 	listProviderModels(providerId: string): Promise<ProviderModelRecord[]> {
@@ -196,10 +224,14 @@ export class DaemonClient implements AppService {
 		this.config = config
 	}
 
-	private request<TResult>(message: DaemonRequest, events?: InferenceEvents): Promise<TResult> {
+	private request<TResult>(
+		message: DaemonRequest,
+		events?: InferenceEvents,
+		question?: AskQuestionFn
+	): Promise<TResult> {
 		return new Promise<TResult>((resolve, reject) => {
-			this.pendingRequests.set(message.id, { events, reject, resolve: value => resolve(value as TResult) })
-			this.socket.write(`${JSON.stringify(message)}\n`)
+			this.pendingRequests.set(message.id, { events, question, reject, resolve: value => resolve(value as TResult) })
+			writeFramedMessage(this.socket, encodeDaemonRequest(message))
 		})
 	}
 
@@ -208,19 +240,11 @@ export class DaemonClient implements AppService {
 	}
 
 	private startListening(): void {
-		let buffer = ''
-		this.socket.setEncoding('utf8')
+		const reader = new FramedMessageReader()
 		this.socket.on('data', chunk => {
-			buffer += chunk
-			let newlineIndex = buffer.indexOf('\n')
-			while (newlineIndex >= 0) {
-				const line = buffer.slice(0, newlineIndex).trim()
-				buffer = buffer.slice(newlineIndex + 1)
-				if (line) {
-					this.handleMessage(JSON.parse(line) as DaemonResponse)
-				}
-				newlineIndex = buffer.indexOf('\n')
-			}
+			reader.push(chunk as Buffer, payload => {
+				this.handleMessage(decodeDaemonResponse(payload) as DaemonResponse)
+			})
 		})
 	}
 
@@ -246,6 +270,11 @@ export class DaemonClient implements AppService {
 			return
 		}
 
+		if (message.type === 'questionPrompt') {
+			void this.handleQuestionPrompt(message.id, message.promptId, message.prompt, pendingRequest.question)
+			return
+		}
+
 		this.pendingRequests.delete(message.id)
 		if (!message.ok) {
 			pendingRequest.reject(new Error(message.error))
@@ -258,6 +287,18 @@ export class DaemonClient implements AppService {
 	private pushTranscriptEntry(entry: WorkerTranscriptEntry): void {
 		const currentEntries = this.transcriptCache.get(entry.conversationId) ?? []
 		this.transcriptCache.set(entry.conversationId, mergeTranscriptEntries(currentEntries, [entry]))
+	}
+
+	private async handleQuestionPrompt(
+		requestId: string,
+		promptId: string,
+		prompt: ToolQuestionPrompt,
+		askQuestion: PendingRequest['question']
+	): Promise<void> {
+		const answer: ToolQuestionAnswer = askQuestion
+			? await askQuestion(prompt)
+			: { answer: '', cancelled: true, source: 'cancelled' }
+		await this.request<null>({ answer, id: randomUUID(), promptId, requestId, type: 'questionResponse' })
 	}
 
 	private async handleToolAuthorizationPrompt(
@@ -287,6 +328,7 @@ function forwardWorkerEvent(event: WorkerTurnEvent, events: InferenceEvents | un
 		case 'toolCallsFinish':
 			events?.onToolCallsFinish?.(event.toolCalls)
 			return
+		case 'toolAudit':
 		case 'mutation':
 		case 'completed':
 			break

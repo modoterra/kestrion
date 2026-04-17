@@ -3,7 +3,7 @@ import { startTransition, type Dispatch, type MutableRefObject, type SetStateAct
 
 import { isDraftConversationId } from '../services/agent-service'
 import type { AppService } from '../services/app-service'
-import type { ConversationSummary, ConversationThread } from '../types'
+import type { ConversationCompactionResult, ConversationSummary, ConversationThread } from '../types'
 import { configureShortcutFriendlyField } from '../ui/helpers'
 
 type SetConversations = Dispatch<SetStateAction<ConversationSummary[]>>
@@ -62,6 +62,7 @@ export function useThreadActions({
 	setStatus: Dispatch<SetStateAction<string>>
 }): {
 	applyThread: (thread: ConversationThread, conversations: ConversationSummary[], nextStatus: string) => void
+	compactConversation: () => Promise<void>
 	createConversation: () => void
 	reloadConversation: () => Promise<void>
 } {
@@ -74,10 +75,12 @@ export function useThreadActions({
 		})
 	}
 	const createConversation = (): void => createFreshConversation(busy, resetComposer, service, applyThread)
+	const compactConversation = (): Promise<void> =>
+		compactCurrentConversation(activeThreadId, busy, service, applyThread, setError, setStatus)
 	const reloadConversation = (): Promise<void> =>
 		reloadCurrentConversation(activeThreadId, busy, service, applyThread, setStatus)
 
-	return { applyThread, createConversation, reloadConversation }
+	return { applyThread, compactConversation, createConversation, reloadConversation }
 }
 
 export function useConversationDeletionActions({
@@ -181,6 +184,49 @@ async function reloadCurrentConversation(
 		service.listConversations()
 	])
 	applyThread(thread, conversations, 'Conversation reloaded.')
+}
+
+async function compactCurrentConversation(
+	activeThreadId: string,
+	busy: boolean,
+	service: AppService,
+	applyThread: (thread: ConversationThread, conversations: ConversationSummary[], nextStatus: string) => void,
+	setError: Dispatch<SetStateAction<string | null>>,
+	setStatus: Dispatch<SetStateAction<string>>
+): Promise<void> {
+	if (busy) {
+		return
+	}
+
+	try {
+		const result = await service.compactConversation(activeThreadId)
+		const status = getCompactionStatusMessage(result)
+
+		if (result.reason === 'draft') {
+			setStatus(status)
+			return
+		}
+
+		const [thread, conversations] = await Promise.all([
+			service.loadConversation(activeThreadId),
+			service.listConversations()
+		])
+		applyThread(thread, conversations, status)
+	} catch (error) {
+		setError(error instanceof Error ? error.message : 'Failed to compact the conversation.')
+		setStatus('Conversation compaction failed.')
+	}
+}
+
+function getCompactionStatusMessage(result: ConversationCompactionResult): string {
+	switch (result.reason) {
+		case 'draft':
+			return 'Draft conversation is not saved yet.'
+		case 'no-op':
+			return 'Nothing older than the retained tail to compact.'
+		case 'updated':
+			return 'Conversation compacted for future replies.'
+	}
 }
 
 async function clearAllConversations(

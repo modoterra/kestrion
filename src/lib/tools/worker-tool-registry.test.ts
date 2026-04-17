@@ -8,14 +8,19 @@ test('worker tool registry exposes the full tool list', () => {
 })
 
 test('worker tool registry routes hosted tools through the daemon bridge', async () => {
-	const executeHostedTool = mock((toolName: 'question' | 'remember' | 'skill' | 'todo', argumentsJson: string) =>
-		Promise.resolve(JSON.stringify({ argumentsJson, ok: true, toolName }))
+	const executeHostedTool = mock(
+		(toolName: 'fetch' | 'question' | 'remember' | 'skill' | 'todo', argumentsJson: string) =>
+			Promise.resolve(JSON.stringify({ argumentsJson, ok: true, toolName }))
 	)
 	const registry = createWorkerToolRegistry(executeHostedTool)
+	const fetchTool = registry.find(tool => tool.name === 'fetch')
 	const rememberTool = registry.find(tool => tool.name === 'remember')
 	const todoTool = registry.find(tool => tool.name === 'todo')
 	const skillTool = registry.find(tool => tool.name === 'skill')
 
+	await expect(fetchTool?.execute('{"url":"https://example.com"}', {})).resolves.toBe(
+		JSON.stringify({ argumentsJson: '{"url":"https://example.com"}', ok: true, toolName: 'fetch' })
+	)
 	await expect(rememberTool?.execute('{"memory":"scratch","action":"read"}', {})).resolves.toBe(
 		JSON.stringify({ argumentsJson: '{"memory":"scratch","action":"read"}', ok: true, toolName: 'remember' })
 	)
@@ -26,6 +31,7 @@ test('worker tool registry routes hosted tools through the daemon bridge', async
 		JSON.stringify({ argumentsJson: '{"action":"list"}', ok: true, toolName: 'skill' })
 	)
 	expect(executeHostedTool.mock.calls).toEqual([
+		['fetch', '{"url":"https://example.com"}'],
 		['remember', '{"memory":"scratch","action":"read"}'],
 		['todo', '{"action":"list"}'],
 		['skill', '{"action":"list"}']

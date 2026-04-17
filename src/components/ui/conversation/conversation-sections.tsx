@@ -54,6 +54,7 @@ type ComposerPaneProps = {
 	providerMode: 'custom' | 'fireworks' | null
 	shellWidth: number
 	spinnerFrameIndex: number
+	status: string
 	temperature: number
 	turnActivity: TurnActivityState
 }
@@ -117,6 +118,7 @@ export function ComposerPane(props: ComposerPaneProps): ReactNode {
 						providerLabel={props.providerLabel}
 						providerMode={props.providerMode}
 						spinnerFrameIndex={props.spinnerFrameIndex}
+						status={props.status}
 						temperature={props.temperature}
 						turnActivity={props.turnActivity}
 						width={props.shellWidth}

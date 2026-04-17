@@ -3,6 +3,9 @@ import { useMemo } from 'react'
 
 import type { ProviderModelRecord } from '../types'
 import {
+	COMPACT_AUTO_PROMPT_CHAR_PRESETS,
+	COMPACT_AUTO_TURN_THRESHOLD_PRESETS,
+	COMPACT_TAIL_TURN_PRESETS,
 	MAX_TOKEN_PRESETS,
 	PROMPT_TRUNCATE_PRESETS,
 	type ProviderDraft,
@@ -26,6 +29,12 @@ type ProviderConfigDerivedArgs = {
 
 export type ProviderConfigDerivedState = {
 	activeProviderIndex: number
+	compactAutoPromptCharsIndex: number
+	compactAutoPromptCharsOptions: SelectOption[]
+	compactAutoTurnThresholdIndex: number
+	compactAutoTurnThresholdOptions: SelectOption[]
+	compactTailTurnsIndex: number
+	compactTailTurnsOptions: SelectOption[]
 	currentField: FocusField
 	currentStep: StepId
 	filteredProviderOptions: SelectOption[]
@@ -107,6 +116,12 @@ function useProviderPresetState(
 	draft: ProviderDraft
 ): Pick<
 	ProviderConfigDerivedState,
+	| 'compactAutoPromptCharsIndex'
+	| 'compactAutoPromptCharsOptions'
+	| 'compactAutoTurnThresholdIndex'
+	| 'compactAutoTurnThresholdOptions'
+	| 'compactTailTurnsIndex'
+	| 'compactTailTurnsOptions'
 	| 'maxTokenIndex'
 	| 'maxTokenOptions'
 	| 'promptTruncateIndex'
@@ -122,12 +137,43 @@ function useProviderPresetState(
 		() => withCurrentValueOption(PROMPT_TRUNCATE_PRESETS, draft.promptTruncateLength, 'Current saved truncation'),
 		[draft.promptTruncateLength]
 	)
+	const compactTailTurnsOptions = useMemo(
+		() => withCurrentValueOption(COMPACT_TAIL_TURN_PRESETS, draft.compactTailTurns, 'Current saved compact tail'),
+		[draft.compactTailTurns]
+	)
+	const compactAutoTurnThresholdOptions = useMemo(
+		() =>
+			withCurrentValueOption(
+				COMPACT_AUTO_TURN_THRESHOLD_PRESETS,
+				draft.compactAutoTurnThreshold,
+				'Current saved auto turn threshold'
+			),
+		[draft.compactAutoTurnThreshold]
+	)
+	const compactAutoPromptCharsOptions = useMemo(
+		() =>
+			withCurrentValueOption(
+				COMPACT_AUTO_PROMPT_CHAR_PRESETS,
+				draft.compactAutoPromptChars,
+				'Current saved auto compact prompt chars'
+			),
+		[draft.compactAutoPromptChars]
+	)
 	const temperatureOptions = useMemo(
 		() => withCurrentValueOption(TEMPERATURE_OPTION_PRESETS, draft.temperature, 'Current saved temperature'),
 		[draft.temperature]
 	)
 
 	return {
+		compactAutoPromptCharsIndex: findSelectedIndex(compactAutoPromptCharsOptions, draft.compactAutoPromptChars),
+		compactAutoPromptCharsOptions,
+		compactAutoTurnThresholdIndex: findSelectedIndex(
+			compactAutoTurnThresholdOptions,
+			draft.compactAutoTurnThreshold
+		),
+		compactAutoTurnThresholdOptions,
+		compactTailTurnsIndex: findSelectedIndex(compactTailTurnsOptions, draft.compactTailTurns),
+		compactTailTurnsOptions,
 		maxTokenIndex: findSelectedIndex(maxTokenOptions, draft.maxTokens),
 		maxTokenOptions,
 		promptTruncateIndex: findSelectedIndex(promptTruncateOptions, draft.promptTruncateLength),

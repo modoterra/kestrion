@@ -1,8 +1,10 @@
 import type { ResolvedAppConfig } from '../config'
+import type { McpToolCallResult, McpToolListing } from '../mcp/types'
 import type { DaemonController } from '../runtime/daemon/controller'
 import type { MemorySnapshot } from '../storage/memory-store'
 import type { ToolExecutionContext } from '../tools/tool-types'
 import type {
+	ConversationCompactionResult,
 	ConversationSummary,
 	ConversationThread,
 	InferenceEvents,
@@ -22,6 +24,14 @@ export class ControllerAppService implements AppService {
 		return this.controller.addUserMessage(conversationId, content)
 	}
 
+	callMcpTool(toolName: string, argumentsJson: string): Promise<McpToolCallResult> {
+		return this.controller.callMcpTool(toolName, argumentsJson)
+	}
+
+	compactConversation(conversationId: string): Promise<ConversationCompactionResult> {
+		return this.controller.compactConversation(conversationId)
+	}
+
 	createDraftConversation(): ConversationThread {
 		return this.agentService.createDraftConversation()
 	}
@@ -38,14 +48,16 @@ export class ControllerAppService implements AppService {
 		conversationId: string,
 		signal?: AbortSignal,
 		events?: InferenceEvents,
-		_toolContext?: ToolExecutionContext
+		toolContext?: ToolExecutionContext
 	): Promise<ConversationThread> {
 		const onToolApprovalPrompt = events?.onToolApprovalPrompt
+		const askQuestion = toolContext?.askQuestion
 		return this.controller.generateAssistantReply(
 			conversationId,
 			forwardWorkerEvents(events),
 			signal,
 			onToolApprovalPrompt ? prompt => Promise.resolve(onToolApprovalPrompt(prompt)) : undefined,
+			askQuestion ? prompt => askQuestion(prompt) : undefined,
 			entry => {
 				events?.onWorkerTranscriptEntry?.(entry)
 			}
@@ -58,6 +70,10 @@ export class ControllerAppService implements AppService {
 
 	listConversations(limit?: number): Promise<ConversationSummary[]> {
 		return this.controller.listConversations(limit)
+	}
+
+	listMcpTools(): Promise<McpToolListing> {
+		return this.controller.listMcpTools()
 	}
 
 	listProviderModels(providerId: string): Promise<ProviderModelRecord[]> {
@@ -85,18 +101,20 @@ function forwardWorkerEvents(
 	events: InferenceEvents | undefined
 ): Parameters<DaemonController['generateAssistantReply']>[1] {
 	return event => {
-		if (event.type === 'textDelta') {
-			events?.onTextDelta?.(event.delta)
-			return
-		}
-
-		if (event.type === 'toolCallsStart') {
-			events?.onToolCallsStart?.(event.toolCalls)
-			return
-		}
-
-		if (event.type === 'toolCallsFinish') {
-			events?.onToolCallsFinish?.(event.toolCalls)
+		switch (event.type) {
+			case 'textDelta':
+				events?.onTextDelta?.(event.delta)
+				break
+			case 'toolCallsStart':
+				events?.onToolCallsStart?.(event.toolCalls)
+				break
+			case 'toolCallsFinish':
+				events?.onToolCallsFinish?.(event.toolCalls)
+				break
+			case 'toolAudit':
+			case 'mutation':
+			case 'completed':
+				break
 		}
 	}
 }

@@ -30,6 +30,15 @@ export const messages = sqliteTable(
 	table => [index('idx_messages_conversation_created').on(table.conversationId, table.createdAt)]
 )
 
+export const conversationCompaction = sqliteTable('conversation_compaction', {
+	compactedThroughMessageId: text('compacted_through_message_id').notNull(),
+	conversationId: text('conversation_id')
+		.primaryKey()
+		.references(() => conversations.id, { onDelete: 'cascade' }),
+	summary: text('summary').notNull(),
+	updatedAt: text('updated_at').notNull()
+})
+
 export const conversationToolCalls = sqliteTable(
 	'conversation_tool_calls',
 	{
@@ -109,7 +118,13 @@ export const toolMemoryEntries = sqliteTable(
 		content: text('content').notNull(),
 		createdAt: text('created_at').notNull(),
 		id: text('id').primaryKey(),
+		integrityState: text('integrity_state').notNull().default('unsigned'),
 		kind: text('kind').notNull(),
+		lastValidatedAt: text('last_validated_at'),
+		originJson: text('origin_json').notNull().default('{}'),
+		signature: text('signature').notNull().default(''),
+		signerKeyId: text('signer_key_id').notNull().default(''),
+		staleAfter: text('stale_after').notNull().default(''),
 		tagsJson: text('tags_json').notNull().default('[]'),
 		title: text('title').notNull().default('')
 	},
@@ -118,7 +133,18 @@ export const toolMemoryEntries = sqliteTable(
 
 export const toolScratchMemory = sqliteTable(
 	'tool_scratch_memory',
-	{ content: text('content').notNull(), id: integer('id').primaryKey(), updatedAt: text('updated_at').notNull() },
+	{
+		content: text('content').notNull(),
+		createdAt: text('created_at').notNull().default(''),
+		id: integer('id').primaryKey(),
+		integrityState: text('integrity_state').notNull().default('unsigned'),
+		lastValidatedAt: text('last_validated_at'),
+		originJson: text('origin_json').notNull().default('{}'),
+		signature: text('signature').notNull().default(''),
+		signerKeyId: text('signer_key_id').notNull().default(''),
+		staleAfter: text('stale_after').notNull().default(''),
+		updatedAt: text('updated_at').notNull()
+	},
 	table => [check('tool_scratch_memory_id_check', sql`${table.id} = 1`)]
 )
 

@@ -12,7 +12,9 @@ type ViewStackControls = {
 	push: (entry: ViewStackEntry) => void
 }
 type CommandPaletteActions = {
+	compactConversation: () => Promise<void>
 	createConversation: () => void
+	openMcpConfig: () => void
 	openMemoryView: () => void
 	openMatrixSetup: () => void
 	openProviderConfig: () => void
@@ -66,7 +68,9 @@ export function useCommandPaletteOverlayAction({
 }
 
 export function useCommandPaletteOptions({
+	compactConversation,
 	createConversation,
+	openMcpConfig,
 	openMemoryView,
 	openMatrixSetup,
 	openProviderConfig,
@@ -78,6 +82,12 @@ export function useCommandPaletteOptions({
 }: CommandPaletteActions): CommandPaletteOption[] {
 	return [
 		createCommandPaletteOption('New session', 'Start a fresh conversation thread', 'new-session', createConversation),
+		createCommandPaletteOption(
+			'Compact conversation',
+			'Summarize older turns for future replies while keeping full history stored',
+			'compact-conversation',
+			compactConversation
+		),
 		createCommandPaletteOption(
 			'Browse sessions',
 			'Browse and open saved sessions',
@@ -97,6 +107,7 @@ export function useCommandPaletteOptions({
 			'provider-settings',
 			openProviderConfig
 		),
+		createCommandPaletteOption('MCP settings', 'Configure the remote MCP endpoint and PAT', 'mcp-settings', openMcpConfig),
 		createCommandPaletteOption(
 			'Reload conversation',
 			'Reload the current conversation from storage',

@@ -6,10 +6,12 @@ import { type Dispatch, type MutableRefObject, type ReactNode, type SetStateActi
 import type { AppProps } from '../../../lib/app/types'
 import { loadAppConfig, saveAppConfig, type ResolvedAppConfig, type WritableAppConfig } from '../../../lib/config'
 import { toErrorMessage } from '../../../lib/errors'
+import { buildWritableMcpConfig, toMcpDraft, type McpDraft } from '../../../lib/mcp/draft-utils'
 import type { MatrixDraft } from '../../../lib/matrix-config/fields'
 import { generateMatrixMarkdown } from '../../../lib/matrix-config/utils'
 import { buildWritableConfig, toProviderDraft } from '../../../lib/provider-config/draft-utils'
 import type { ProviderDraft } from '../../../lib/provider-config/fields'
+import { McpConfigScreen } from '../mcp-config/screen'
 import { MatrixConfigScreen } from '../matrix-config/screen'
 import { ProviderConfigScreen } from '../provider-config/screen'
 import { SessionsScreen } from '../sessions/screen'
@@ -28,6 +30,18 @@ type ProviderOverlayArgs = {
 	fireworksModels: AppProps['fireworksModels']
 	paths: AppProps['paths']
 	providerCloseStatusRef: MutableRefObject<string>
+	service: AppProps['service']
+	setError: Dispatch<SetStateAction<string | null>>
+	setResolvedConfig: Dispatch<SetStateAction<ResolvedAppConfig>>
+	setStatus: Dispatch<SetStateAction<string>>
+	setWritableConfig: Dispatch<SetStateAction<WritableAppConfig>>
+	viewStack: ViewStackControls
+	writableConfig: WritableAppConfig
+}
+type McpOverlayArgs = {
+	busy: boolean
+	mcpCloseStatusRef: MutableRefObject<string>
+	paths: AppProps['paths']
 	service: AppProps['service']
 	setError: Dispatch<SetStateAction<string | null>>
 	setResolvedConfig: Dispatch<SetStateAction<ResolvedAppConfig>>
@@ -139,6 +153,47 @@ export function useMatrixOverlayActions({
 	return { openMatrixSetup, saveMatrixDraft }
 }
 
+export function useMcpOverlayActions({
+	busy,
+	mcpCloseStatusRef,
+	paths,
+	service,
+	setError,
+	setResolvedConfig,
+	setStatus,
+	setWritableConfig,
+	viewStack,
+	writableConfig
+}: McpOverlayArgs): {
+	openMcpConfig: () => void
+	saveMcpConfig: (draft: McpDraft) => Promise<string | null>
+} {
+	const saveMcpConfig = (draft: McpDraft): Promise<string | null> =>
+		saveMcpDraft(
+			draft,
+			mcpCloseStatusRef,
+			paths,
+			service,
+			setError,
+			setResolvedConfig,
+			setStatus,
+			setWritableConfig,
+			writableConfig
+		)
+	const openMcpConfig = (): void => {
+		if (busy || viewStack.isActive) {
+			return
+		}
+
+		mcpCloseStatusRef.current = 'MCP setup closed.'
+		setError(null)
+		viewStack.push(createMcpConfigEntry(mcpCloseStatusRef, saveMcpConfig, setStatus, writableConfig))
+		setStatus('Editing MCP settings.')
+	}
+
+	return { openMcpConfig, saveMcpConfig }
+}
+
 export function useSessionsOverlayAction({
 	activeThreadId,
 	applyThread,
@@ -201,10 +256,12 @@ export function useShortcutsOverlayAction({
 
 export function useToolsOverlayAction({
 	busy,
+	service,
 	setStatus,
 	viewStack
 }: {
 	busy: boolean
+	service: AppProps['service']
 	setStatus: Dispatch<SetStateAction<string>>
 	viewStack: ViewStackControls
 }): { openToolsView: () => void } {
@@ -213,8 +270,35 @@ export function useToolsOverlayAction({
 			return
 		}
 
-		viewStack.push({ element: <ToolsScreen />, onPop: () => setStatus('Composer ready.') })
-		setStatus('Browsing tools.')
+		setStatus('Loading tools.')
+		void service
+			.listMcpTools()
+			.then(mcpListing => {
+				viewStack.push({
+					element: (
+						<ToolsScreen
+							mcpError={null}
+							mcpListing={mcpListing}
+							service={service}
+						/>
+					),
+					onPop: () => setStatus('Composer ready.')
+				})
+				setStatus('Browsing tools.')
+			})
+			.catch(error => {
+				viewStack.push({
+					element: (
+						<ToolsScreen
+							mcpError={error instanceof Error ? error.message : 'Failed to load MCP tools.'}
+							mcpListing={null}
+							service={service}
+						/>
+					),
+					onPop: () => setStatus('Composer ready.')
+				})
+				setStatus('Browsing tools.')
+			})
 	}
 
 	return { openToolsView }
@@ -269,6 +353,34 @@ async function saveMatrixConfigDraft(
 	}
 }
 
+async function saveMcpDraft(
+	draft: McpDraft,
+	mcpCloseStatusRef: MutableRefObject<string>,
+	paths: AppProps['paths'],
+	service: AppProps['service'],
+	setError: Dispatch<SetStateAction<string | null>>,
+	setResolvedConfig: Dispatch<SetStateAction<ResolvedAppConfig>>,
+	setStatus: Dispatch<SetStateAction<string>>,
+	setWritableConfig: Dispatch<SetStateAction<WritableAppConfig>>,
+	writableConfig: WritableAppConfig
+): Promise<string | null> {
+	try {
+		const nextWritableConfig = buildWritableMcpConfig(writableConfig, draft)
+		const nextResolvedConfig = saveAppConfig(paths, nextWritableConfig)
+		await service.updateConfig(nextResolvedConfig)
+		setWritableConfig(nextWritableConfig)
+		setResolvedConfig(nextResolvedConfig)
+		setError(null)
+		mcpCloseStatusRef.current = nextResolvedConfig.mcp.enabled
+			? `MCP saved for ${nextResolvedConfig.mcp.endpoint}.`
+			: 'MCP disabled.'
+		return null
+	} catch (cause) {
+		setStatus('MCP settings are invalid.')
+		return toErrorMessage(cause)
+	}
+}
+
 function createProviderConfigEntry(
 	providerCloseStatusRef: MutableRefObject<string>,
 	saveProviderConfig: (draft: ProviderDraft) => Promise<string | null>,
@@ -289,6 +401,28 @@ function createProviderConfigEntry(
 		),
 		onPop: () => {
 			setStatus(providerCloseStatusRef.current)
+		}
+	}
+}
+
+function createMcpConfigEntry(
+	mcpCloseStatusRef: MutableRefObject<string>,
+	saveMcpConfig: (draft: McpDraft) => Promise<string | null>,
+	setStatus: Dispatch<SetStateAction<string>>,
+	writableConfig: WritableAppConfig
+): ViewStackEntry {
+	return {
+		element: (
+			<McpConfigScreen
+				initialDraft={toMcpDraft(writableConfig)}
+				onReset={() => {
+					setStatus('MCP form reset to saved settings.')
+				}}
+				onSave={saveMcpConfig}
+			/>
+		),
+		onPop: () => {
+			setStatus(mcpCloseStatusRef.current)
 		}
 	}
 }

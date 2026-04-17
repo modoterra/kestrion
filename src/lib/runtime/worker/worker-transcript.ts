@@ -1,5 +1,5 @@
 import type { WorkerTranscriptEntry, WorkerTranscriptKind } from '../../types'
-import type { WorkerTurnRequest } from './types'
+import type { WorkerSessionRequest } from './types'
 
 type WorkerTranscriptState = {
 	conversationId: string
@@ -9,7 +9,7 @@ type WorkerTranscriptState = {
 }
 
 export function createWorkerTranscriptState(
-	input: WorkerTurnRequest,
+	input: WorkerSessionRequest,
 	onTranscriptEntry?: (entry: Omit<WorkerTranscriptEntry, 'id'>) => void
 ): WorkerTranscriptState {
 	return { conversationId: input.conversation.id, nextSequence: 0, onTranscriptEntry, turnId: input.turnId }

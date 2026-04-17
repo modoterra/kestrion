@@ -1,8 +1,16 @@
 import { randomUUID } from 'node:crypto'
 
-import { desc, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 
 import { toolMemoryEntries, toolScratchMemory } from '../../db/schema'
+import {
+	buildMemoryOrigin,
+	readTrustedScratchMemoryRecord,
+	readTrustedStructuredMemoryRecords,
+	signScratchMemoryRecord,
+	signStructuredMemoryRecord
+} from '../integrity/memory'
+import { loadIntegrityStatus } from '../integrity/state'
 import { getErrorMessage, isRecord, parseOptionalPositiveInteger } from './common'
 import { withToolDatabase } from './database'
 import type { ToolExecutionContext, ToolMemoryKind } from './tool-types'
@@ -79,13 +87,14 @@ export function runRememberTool(input: unknown, options: ToolExecutionContext = 
 	try {
 		const argumentsValue = parseRememberArguments(input)
 		assertMemoryKindAllowed(argumentsValue.memory, options)
+		assertRememberToolEnabled(options)
 
 		return withToolDatabase(options, database => {
 			if (argumentsValue.memory === 'scratch') {
-				return runScratchMemory(database, argumentsValue)
+				return runScratchMemory(database, argumentsValue, options)
 			}
 
-			return runStructuredMemory(database, argumentsValue)
+			return runStructuredMemory(database, argumentsValue, options)
 		})
 	} catch (error) {
 		return { error: getErrorMessage(error), ok: false }
@@ -99,35 +108,78 @@ function assertMemoryKindAllowed(memoryKind: ToolMemoryKind, options: ToolExecut
 	}
 }
 
-function runScratchMemory(database: DatabaseLike, argumentsValue: RememberArguments): RememberSuccessResult {
-	const currentContent = getScratchContent(database)
-
+function runScratchMemory(
+	database: DatabaseLike,
+	argumentsValue: RememberArguments,
+	options: ToolExecutionContext
+): RememberSuccessResult {
 	switch (argumentsValue.action) {
 		case 'read':
 		case 'list':
-			return { content: currentContent, memory: 'scratch', ok: true }
+			return {
+				content: readTrustedScratchMemoryRecord(getRequiredAppPaths(options))?.content ?? '',
+				memory: 'scratch',
+				ok: true
+			}
 		case 'write': {
+			const currentContent = getScratchContent(database)
 			const nextContent = buildScratchContent(currentContent, argumentsValue.content, argumentsValue.mode ?? 'append')
 			const now = new Date().toISOString()
+			const createdAt = getScratchCreatedAt(database) ?? now
+			const signature = signScratchMemoryRecord(getRequiredAppPaths(options), {
+				content: nextContent,
+				createdAt,
+				id: 1,
+				origin: buildMemoryOrigin(options.memoryOrigin, REMEMBER_TOOL_NAME),
+				updatedAt: now
+			})
 			database
 				.insert(toolScratchMemory)
-				.values({ content: nextContent, id: 1, updatedAt: now })
-				.onConflictDoUpdate({ set: { content: nextContent, updatedAt: now }, target: toolScratchMemory.id })
+				.values({
+					content: nextContent,
+					createdAt,
+					id: 1,
+					integrityState: signature.integrityState,
+					lastValidatedAt: signature.lastValidatedAt,
+					originJson: signature.originJson,
+					signature: signature.signature,
+					signerKeyId: signature.signerKeyId,
+					staleAfter: signature.staleAfter,
+					updatedAt: now
+				})
+				.onConflictDoUpdate({
+					set: {
+						content: nextContent,
+						createdAt,
+						integrityState: signature.integrityState,
+						lastValidatedAt: signature.lastValidatedAt,
+						originJson: signature.originJson,
+						signature: signature.signature,
+						signerKeyId: signature.signerKeyId,
+						staleAfter: signature.staleAfter,
+						updatedAt: now
+					},
+					target: toolScratchMemory.id
+				})
 				.run()
 			return { content: nextContent, memory: 'scratch', ok: true }
 		}
 	}
 }
 
-function runStructuredMemory(database: DatabaseLike, argumentsValue: RememberArguments): RememberSuccessResult {
+function runStructuredMemory(
+	database: DatabaseLike,
+	argumentsValue: RememberArguments,
+	options: ToolExecutionContext
+): RememberSuccessResult {
 	const memory = argumentsValue.memory === 'episodic' ? 'episodic' : 'long-term'
 
 	switch (argumentsValue.action) {
 		case 'write':
-			return writeStructuredMemory(database, memory, argumentsValue)
+			return writeStructuredMemory(database, memory, argumentsValue, options)
 		case 'read':
 		case 'list':
-			return listStructuredMemory(database, memory, argumentsValue)
+			return listStructuredMemory(memory, argumentsValue, options)
 	}
 }
 
@@ -138,6 +190,15 @@ function getScratchContent(database: DatabaseLike): string {
 		.where(eq(toolScratchMemory.id, 1))
 		.get()
 	return row?.content ?? ''
+}
+
+function getScratchCreatedAt(database: DatabaseLike): string | null {
+	const row = database
+		.select({ createdAt: toolScratchMemory.createdAt })
+		.from(toolScratchMemory)
+		.where(eq(toolScratchMemory.id, 1))
+		.get()
+	return row?.createdAt || null
 }
 
 function toMemoryEntry(row: MemoryDatabaseRow): MemoryEntry {
@@ -212,7 +273,8 @@ function buildScratchContent(currentContent: string, nextChunk: string | undefin
 function writeStructuredMemory(
 	database: DatabaseLike,
 	memory: Extract<ToolMemoryKind, 'episodic' | 'long-term'>,
-	argumentsValue: RememberArguments
+	argumentsValue: RememberArguments,
+	options: ToolExecutionContext
 ): RememberSuccessResult {
 	const content = argumentsValue.content?.trim()
 	if (!content) {
@@ -226,13 +288,28 @@ function writeStructuredMemory(
 		tags: argumentsValue.tags ?? [],
 		title: argumentsValue.title?.trim() ?? ''
 	}
+	const signature = signStructuredMemoryRecord(getRequiredAppPaths(options), {
+		content: entry.content,
+		createdAt: entry.createdAt,
+		id: entry.id,
+		kind: memory,
+		origin: buildMemoryOrigin(options.memoryOrigin, REMEMBER_TOOL_NAME),
+		tags: entry.tags,
+		title: entry.title
+	})
 	database
 		.insert(toolMemoryEntries)
 		.values({
 			content: entry.content,
 			createdAt: entry.createdAt,
 			id: entry.id,
+			integrityState: signature.integrityState,
 			kind: memory,
+			lastValidatedAt: signature.lastValidatedAt,
+			originJson: signature.originJson,
+			signature: signature.signature,
+			signerKeyId: signature.signerKeyId,
+			staleAfter: signature.staleAfter,
 			tagsJson: JSON.stringify(entry.tags),
 			title: entry.title
 		})
@@ -242,11 +319,11 @@ function writeStructuredMemory(
 }
 
 function listStructuredMemory(
-	database: DatabaseLike,
 	memory: Extract<ToolMemoryKind, 'episodic' | 'long-term'>,
-	argumentsValue: RememberArguments
+	argumentsValue: RememberArguments,
+	options: ToolExecutionContext
 ): RememberSuccessResult {
-	const filteredEntries = readStructuredMemoryEntries(database, memory, argumentsValue.query)
+	const filteredEntries = readStructuredMemoryEntries(getRequiredAppPaths(options), memory, argumentsValue.query)
 	const limit = argumentsValue.limit ?? DEFAULT_MEMORY_LIMIT
 
 	return {
@@ -259,23 +336,12 @@ function listStructuredMemory(
 }
 
 function readStructuredMemoryEntries(
-	database: DatabaseLike,
+	appPaths: ReturnType<typeof getRequiredAppPaths>,
 	memory: Extract<ToolMemoryKind, 'episodic' | 'long-term'>,
 	query: string | undefined
 ): MemoryEntry[] {
 	const normalizedQuery = query?.trim().toLowerCase()
-	const rows = database
-		.select({
-			content: toolMemoryEntries.content,
-			createdAt: toolMemoryEntries.createdAt,
-			id: toolMemoryEntries.id,
-			tagsJson: toolMemoryEntries.tagsJson,
-			title: toolMemoryEntries.title
-		})
-		.from(toolMemoryEntries)
-		.where(eq(toolMemoryEntries.kind, memory))
-		.orderBy(desc(toolMemoryEntries.createdAt))
-		.all() as MemoryDatabaseRow[]
+	const rows = readTrustedStructuredMemoryRecords(appPaths, memory) as MemoryDatabaseRow[]
 
 	return rows
 		.map(row => toMemoryEntry(row))
@@ -286,4 +352,19 @@ function readStructuredMemoryEntries(
 
 			return `${entry.title}\n${entry.content}\n${entry.tags.join(' ')}`.toLowerCase().includes(normalizedQuery)
 		})
+}
+
+function assertRememberToolEnabled(options: ToolExecutionContext): void {
+	const integrityStatus = loadIntegrityStatus(getRequiredAppPaths(options))
+	if (integrityStatus.killSwitchActive) {
+		throw new Error('Remember is blocked while the deny kill switch is active.')
+	}
+}
+
+function getRequiredAppPaths(options: ToolExecutionContext) {
+	if (!options.appPaths) {
+		throw new Error('Remember requires app storage paths.')
+	}
+
+	return options.appPaths
 }

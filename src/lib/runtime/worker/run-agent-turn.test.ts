@@ -83,6 +83,13 @@ function createResolvedConfig(): ResolvedAppConfig {
 	return {
 		configFile: '/tmp/config/config.json',
 		defaultProvider: 'fireworks',
+		mcp: {
+			enabled: false,
+			endpoint: '',
+			pat: '',
+			patEnv: 'KESTRION_MCP_PAT',
+			patSource: 'missing'
+		},
 		matrixPromptError: null,
 		matrixPromptPath: '/tmp/config/MATRIX.md',
 		providers: {
@@ -91,6 +98,9 @@ function createResolvedConfig(): ResolvedAppConfig {
 				apiKeyEnv: 'FIREWORKS_API_KEY',
 				apiKeySource: 'config',
 				baseUrl: 'https://api.fireworks.ai/inference/v1',
+				compactAutoPromptChars: 4000,
+				compactAutoTurnThreshold: 8,
+				compactTailTurns: 4,
 				maxTokens: 1024,
 				model: 'accounts/fireworks/models/kimi-k2p5',
 				promptTruncateLength: 6000,

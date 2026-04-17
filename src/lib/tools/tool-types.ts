@@ -33,18 +33,51 @@ export type ToolQuestionAnswer =
 	| { answer: ''; cancelled: true; source: 'cancelled' }
 
 export type ToolFileAccessPolicy = { defaultReadRoot: string; readRoots: string[]; writeRoots: string[] }
+export type ToolFetchGatewayRequest = { resolvedAddress: { address: string; family: 4 | 6 }; url: URL }
+export type ToolFetchGatewayResponse = {
+	body: string | Uint8Array
+	headers: Record<string, string | undefined>
+	status: number
+	url?: string
+}
 export type ToolMemoryKind = 'episodic' | 'long-term' | 'scratch'
 export type ToolNetworkAccessPolicy = { allowedDomains: string[] }
 
+export type ToolInvocationAuditRecord = {
+	contentType?: string
+	durationMs: number
+	error?: string
+	exitCode?: number
+	finalUrl?: string
+	outputSizeBytes?: number
+	resourceUsage?: { maxResidentSetSizeBytes?: number; systemCpuMs?: number; userCpuMs?: number }
+	responseSizeBytes?: number
+	responseStatus?: number
+	sanitizedArguments: unknown
+	status: 'denied' | 'error' | 'success'
+	timedOut?: boolean
+	toolName: string
+}
 export type ToolMutationRecord = { operation: 'write'; path: string; sizeBytes: number; toolName: string }
+export type ToolMemoryOrigin = {
+	conversationId?: string
+	model?: string
+	provider?: string
+	toolName: string
+	turnId?: string
+}
 
 export type ToolExecutionContext = {
 	allowedMemoryKinds?: ToolMemoryKind[]
 	allowedSkillNames?: string[]
 	appPaths?: AppPaths
 	askQuestion?: (prompt: ToolQuestionPrompt) => Promise<ToolQuestionAnswer>
+	fetchGatewayRequester?: (request: ToolFetchGatewayRequest) => Promise<ToolFetchGatewayResponse>
+	fetchGatewayResolver?: (hostname: string) => Promise<Array<{ address: string; family: 4 | 6 }>>
 	fileAccessPolicy?: ToolFileAccessPolicy
+	memoryOrigin?: ToolMemoryOrigin
 	networkAccessPolicy?: ToolNetworkAccessPolicy
+	onAuditRecord?: (record: ToolInvocationAuditRecord) => void
 	onMutation?: (record: ToolMutationRecord) => void
 	todoAllowed?: boolean
 	toolRegistry?: RegisteredTool[]

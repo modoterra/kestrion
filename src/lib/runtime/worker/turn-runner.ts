@@ -1,21 +1,21 @@
 import type { WorkerTranscriptEntry } from '../../types'
 import type {
-	WorkerHostToolRequest,
-	WorkerHostToolResponse,
-	WorkerToolAuthorizationRequest,
-	WorkerToolAuthorizationResponse,
-	WorkerTurnCompletedEvent,
-	WorkerTurnEvent,
-	WorkerTurnRequest
+	WorkerExecutionEvent,
+	WorkerSessionRequest,
+	WorkerToolExecutionRequest,
+	WorkerToolExecutionResponse
 } from './types'
 
+export interface WorkerSession {
+	close(): Promise<void>
+	executeTool(request: WorkerToolExecutionRequest): Promise<WorkerToolExecutionResponse>
+}
+
 export interface TurnRunner {
-	runTurn(
-		input: WorkerTurnRequest,
-		onEvent: (event: WorkerTurnEvent) => void,
+	startSession(
+		input: WorkerSessionRequest,
 		signal?: AbortSignal,
-		onToolAuthorizationRequest?: (request: WorkerToolAuthorizationRequest) => Promise<WorkerToolAuthorizationResponse>,
-		onHostToolRequest?: (request: WorkerHostToolRequest) => Promise<WorkerHostToolResponse>,
-		onTranscriptEntry?: (entry: Omit<WorkerTranscriptEntry, 'id'>) => void
-	): Promise<WorkerTurnCompletedEvent>
+		onTranscriptEntry?: (entry: Omit<WorkerTranscriptEntry, 'id'>) => void,
+		onExecutionEvent?: (event: WorkerExecutionEvent) => void
+	): Promise<WorkerSession>
 }

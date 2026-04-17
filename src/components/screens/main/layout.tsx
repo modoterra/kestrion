@@ -33,6 +33,7 @@ type MainScreenLayoutProps = {
 	providerLabel: string
 	sessionTitle: string
 	spinnerFrameIndex: number
+	status: string
 	temperature: number
 	terminalWidth: number
 	toolCallMessages: ToolCallMessageRecord[]
@@ -103,6 +104,7 @@ function buildConversationViewProps(
 		sessionTitle: props.sessionTitle,
 		shellWidth: props.shellWidth,
 		spinnerFrameIndex: props.spinnerFrameIndex,
+		status: props.status,
 		temperature: props.temperature,
 		toolCallMessages: props.toolCallMessages,
 		turnActivity: props.turnActivity,

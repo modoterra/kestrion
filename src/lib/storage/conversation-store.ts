@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { asc, eq, sql } from 'drizzle-orm'
 
 import {
+	conversationCompaction,
 	conversationToolCalls,
 	conversationWorkerTranscript,
 	conversations,
@@ -15,6 +16,7 @@ import {
 import type { ToolPolicy } from '../tools/policy'
 import type {
 	ConversationRecord,
+	ConversationCompactionRecord,
 	ConversationSummary,
 	ConversationThread,
 	InferenceToolCall,
@@ -46,6 +48,11 @@ type AppendToolCallMessageInput = {
 
 type AppendWorkerTranscriptEntryInput = Omit<WorkerTranscriptEntry, 'id'>
 type CreateConversationInput = { model: string; provider: string; title: string }
+type SaveConversationCompactionInput = {
+	compactedThroughMessageId: string
+	conversationId: string
+	summary: string
+}
 
 export class ConversationStore {
 	private readonly client: AppDatabaseConnection['client']
@@ -125,7 +132,7 @@ export class ConversationStore {
 
 		this.database.insert(conversations).values(conversation).run()
 
-		return { conversation, messages: [], toolCallMessages: [] }
+		return { compaction: null, conversation, messages: [], toolCallMessages: [] }
 	}
 
 	deleteAllConversations(): void {
@@ -144,10 +151,26 @@ export class ConversationStore {
 		}
 
 		return {
+			compaction: this.getConversationCompaction(conversationId),
 			conversation: conversationRow,
 			messages: this.getConversationMessages(conversationId),
 			toolCallMessages: this.getConversationToolCallMessages(conversationId)
 		}
+	}
+
+	getConversationCompaction(conversationId: string): ConversationCompactionRecord | null {
+		const row = this.database
+			.select({
+				compactedThroughMessageId: conversationCompaction.compactedThroughMessageId,
+				conversationId: conversationCompaction.conversationId,
+				summary: conversationCompaction.summary,
+				updatedAt: conversationCompaction.updatedAt
+			})
+			.from(conversationCompaction)
+			.where(eq(conversationCompaction.conversationId, conversationId))
+			.get() as ConversationCompactionRecord | undefined
+
+		return row ?? null
 	}
 
 	listConversations(limit = 50): ConversationSummary[] {
@@ -247,6 +270,35 @@ export class ConversationStore {
 			.set({ status: 'completed' })
 			.where(eq(conversationToolCalls.id, toolCallMessageId))
 			.run()
+	}
+
+	deleteConversationCompaction(conversationId: string): void {
+		this.database.delete(conversationCompaction).where(eq(conversationCompaction.conversationId, conversationId)).run()
+	}
+
+	saveConversationCompaction(input: SaveConversationCompactionInput): ConversationCompactionRecord {
+		const updatedAt = new Date().toISOString()
+		const record: ConversationCompactionRecord = {
+			compactedThroughMessageId: input.compactedThroughMessageId,
+			conversationId: input.conversationId,
+			summary: input.summary,
+			updatedAt
+		}
+
+		this.database
+			.insert(conversationCompaction)
+			.values(record)
+			.onConflictDoUpdate({
+				set: {
+					compactedThroughMessageId: record.compactedThroughMessageId,
+					summary: record.summary,
+					updatedAt: record.updatedAt
+				},
+				target: conversationCompaction.conversationId
+			})
+			.run()
+
+		return record
 	}
 
 	saveToolPolicy(policy: ToolPolicy): ToolPolicy {

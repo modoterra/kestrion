@@ -1,6 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
+import { verifyManagedSkill } from '../integrity/skills'
+import { loadIntegrityStatus } from '../integrity/state'
 import { getAppPaths, getErrorMessage, isRecord } from './common'
 import type { ToolExecutionContext } from './tool-types'
 
@@ -8,7 +10,7 @@ export const SKILL_TOOL_NAME = 'skill'
 
 export const SKILL_TOOL_DEFINITION = {
 	function: {
-		description: 'List or invoke local skills stored in ~/.share/kestrion/skills.',
+		description: 'List or load local skill instruction files stored in ~/.share/kestrion/skills.',
 		name: SKILL_TOOL_NAME,
 		parameters: {
 			additionalProperties: false,
@@ -62,7 +64,8 @@ export function runSkillTool(input: unknown, options: ToolExecutionContext = {})
 		const allowedSkillNames = options.allowedSkillNames
 
 		if (argumentsValue.action === 'list') {
-			const skills = listSkills(skillsDir).filter(skill => isAllowedSkillName(skill, allowedSkillNames))
+			assertSkillsAvailable(options)
+			const skills = listSkills(skillsDir, options).filter(skill => isAllowedSkillName(skill, allowedSkillNames))
 			return { items: skills.map(skill => ({ name: skill, path: join(skillsDir, skill) })), ok: true }
 		}
 
@@ -78,6 +81,11 @@ export function runSkillTool(input: unknown, options: ToolExecutionContext = {})
 		const skillFile = join(skillDirectory, 'SKILL.md')
 		if (!existsSync(skillFile)) {
 			throw new Error(`Skill "${name}" is missing SKILL.md.`)
+		}
+		assertSkillsAvailable(options)
+		const verification = verifyManagedSkill(getAppPaths(options), name)
+		if (!verification.ok) {
+			throw new Error(verification.error)
 		}
 
 		const files = [
@@ -125,15 +133,28 @@ function parseSkillArguments(input: unknown): SkillArguments {
 	return { action, include, name }
 }
 
-function listSkills(skillsDir: string): string[] {
+function listSkills(skillsDir: string, options: ToolExecutionContext): string[] {
 	if (!existsSync(skillsDir)) {
 		return []
 	}
 
 	return readdirSync(skillsDir, { withFileTypes: true })
 		.filter(entry => entry.isDirectory() && existsSync(join(skillsDir, entry.name, 'SKILL.md')))
+		.filter(entry => verifyManagedSkill(getAppPaths(options), entry.name).ok)
 		.map(entry => entry.name)
 		.toSorted((left, right) => left.localeCompare(right))
+}
+
+function assertSkillsAvailable(options: ToolExecutionContext): void {
+	const integrityStatus = loadIntegrityStatus(getAppPaths(options))
+	if (
+		integrityStatus.killSwitchActive ||
+		integrityStatus.findings.some(
+			finding => finding.scope === 'keys' && finding.blockingCapabilities.includes('skills')
+		)
+	) {
+		throw new Error('Skill loading is blocked until integrity findings are resolved.')
+	}
 }
 
 function resolveSkillDirectory(skillsDir: string, name: string): string {

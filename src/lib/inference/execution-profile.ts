@@ -1,5 +1,12 @@
 import type { ResolvedAppConfig } from '../config'
-import type { ConversationRecord, InferenceEvents, InferenceMessage, InferenceRequest, MessageRecord } from '../types'
+import type {
+	ConversationCompactionRecord,
+	ConversationRecord,
+	InferenceEvents,
+	InferenceMessage,
+	InferenceRequest,
+	MessageRecord
+} from '../types'
 import { buildRuntimeSystemPrompt } from './system-prompt'
 
 const KIMI_K2P5_MODEL = 'accounts/fireworks/models/kimi-k2p5'
@@ -39,10 +46,19 @@ type PreparedInferenceRequest = {
 }
 
 type RequestBuildArgs = {
+	compaction?: ConversationCompactionRecord | null
 	config: ResolvedAppConfig
 	conversation: ConversationRecord
 	events?: InferenceEvents
 	messages: MessageRecord[]
+	signal?: AbortSignal
+}
+
+type CompactionRequestBuildArgs = {
+	config: ResolvedAppConfig
+	conversation: ConversationRecord
+	existingSummary?: string | null
+	messagesToCompact: MessageRecord[]
 	signal?: AbortSignal
 }
 
@@ -73,7 +89,7 @@ export type { PreparedInferenceRequest }
 
 export function buildInferenceRequest(args: RequestBuildArgs): PreparedInferenceRequest {
 	const providerConfig = args.config.providers.fireworks
-	const historyMessages = toInferenceHistory(args.messages)
+	const compactionState = getCompactionRequestState(args.messages, args.compaction)
 	const profile = MODEL_EXECUTION_PROFILES.get(args.conversation.model)
 
 	if (!profile) {
@@ -83,11 +99,16 @@ export function buildInferenceRequest(args: RequestBuildArgs): PreparedInference
 			request: {
 				events: args.events,
 				maxTokens: providerConfig.maxTokens,
-				messages: [{ content: buildRuntimeSystemPrompt(args.config.systemPrompt), role: 'system' }, ...historyMessages],
+				messages: [
+					{ content: buildRuntimeSystemPrompt(args.config.systemPrompt), role: 'system' },
+					...compactionState.summaryMessages,
+					...compactionState.historyMessages
+				],
 				model: args.conversation.model,
 				promptTruncateLength: providerConfig.promptTruncateLength,
 				signal: args.signal,
-				temperature: providerConfig.temperature
+				temperature: providerConfig.temperature,
+				toolMode: 'enabled'
 			}
 		}
 	}
@@ -102,21 +123,98 @@ export function buildInferenceRequest(args: RequestBuildArgs): PreparedInference
 			maxTokens: mode.maxTokens,
 			messages: [
 				{ content: buildRuntimeSystemPrompt(args.config.systemPrompt), role: 'system' },
+				...compactionState.summaryMessages,
 				...mode.assistantAnchors.map((content): InferenceMessage => ({ content, role: 'assistant' })),
-				...historyMessages
+				...compactionState.historyMessages
 			],
 			model: args.conversation.model,
 			promptTruncateLength: mode.promptTruncateLength,
 			reasoningEffort: mode.reasoningEffort,
 			signal: args.signal,
 			temperature: mode.temperature,
+			toolMode: 'enabled',
 			topP: mode.topP
 		}
 	}
 }
 
+export function getPreparedInferenceUsageChars(args: RequestBuildArgs): number {
+	return JSON.stringify(buildInferenceRequest(args).request.messages).length
+}
+
+export function buildCompactionRequest(args: CompactionRequestBuildArgs): InferenceRequest {
+	const providerConfig = args.config.providers.fireworks
+
+	return {
+		maxTokens: Math.min(providerConfig.maxTokens, 768),
+		messages: [
+			{
+				content: buildCompactionSystemPrompt(args.config.systemPrompt),
+				role: 'system'
+			},
+			{
+				content: buildCompactionUserPrompt(args.messagesToCompact, args.existingSummary),
+				role: 'user'
+			}
+		],
+		model: args.conversation.model,
+		promptTruncateLength: providerConfig.promptTruncateLength,
+		signal: args.signal,
+		temperature: 0.2,
+		toolMode: 'disabled'
+	}
+}
+
+export function getSerializedInferenceHistoryChars(messages: MessageRecord[]): number {
+	return JSON.stringify(toInferenceHistory(messages)).length
+}
+
 function toInferenceHistory(messages: MessageRecord[]): InferenceMessage[] {
 	return messages.map((message): InferenceMessage => ({ content: message.content, role: message.role }))
+}
+
+function getCompactionRequestState(
+	messages: MessageRecord[],
+	compaction: ConversationCompactionRecord | null | undefined
+): { historyMessages: InferenceMessage[]; summaryMessages: InferenceMessage[] } {
+	if (!compaction) {
+		return { historyMessages: toInferenceHistory(messages), summaryMessages: [] }
+	}
+
+	const compactedThroughIndex = messages.findIndex(message => message.id === compaction.compactedThroughMessageId)
+	if (compactedThroughIndex < 0) {
+		return { historyMessages: toInferenceHistory(messages), summaryMessages: [] }
+	}
+
+	return {
+		historyMessages: toInferenceHistory(messages.slice(compactedThroughIndex + 1)),
+		summaryMessages: [{ content: `Conversation summary checkpoint\n\n${compaction.summary}`, role: 'system' }]
+	}
+}
+
+function buildCompactionSystemPrompt(systemPrompt: string): string {
+	return `${buildRuntimeSystemPrompt(
+		systemPrompt
+	)}\n\nCreate a compact checkpoint summary for prior conversation context. Preserve goals, decisions, constraints, user preferences, active files or paths, and unresolved work. Be factual, concise, and non-redundant. Keep the summary under 1200 characters.`
+}
+
+function buildCompactionUserPrompt(messagesToCompact: MessageRecord[], existingSummary?: string | null): string {
+	const sections = [
+		'Update the conversation checkpoint summary using the material below.',
+		existingSummary?.trim() ? `Existing checkpoint summary:\n${existingSummary.trim()}` : 'Existing checkpoint summary:\n(none)',
+		`Newly compacted conversation segment:\n${renderConversationSegment(messagesToCompact)}`
+	]
+
+	return sections.join('\n\n')
+}
+
+function renderConversationSegment(messages: MessageRecord[]): string {
+	return messages
+		.map(message => {
+			const normalizedContent = message.content.trim() || '(empty)'
+			return `${message.role.toUpperCase()}:\n${normalizedContent}`
+		})
+		.join('\n\n')
 }
 
 function resolveKimiMode(messages: MessageRecord[]): ExecutionModeConfig {
